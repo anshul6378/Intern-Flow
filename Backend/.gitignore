@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+.env
+
+# VS Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Alembic
+alembic/versions/*.pyc
+
+# Testing
+.pytest_cache/
+coverage/
+
+# Build
+dist/
+build/
+
+# SQLite
+*.sqlite3
+
+# Environment Variables
+.env.*
+
+# mypy
+.mypy_cache/
+
+# Ruff
+.ruff_cache/
+
+# Node
+node_modules/
+
+# Uploaded Files
+uploads/
+
+# Temporary Files
+tmp/
+temp/
