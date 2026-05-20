@@ -33,14 +33,14 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    config.set_main_option("sqlalchemy.url", get_url())
 
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+    # Create engine directly from the URL to avoid ConfigParser interpolation issues
+    from sqlalchemy import create_engine
+    
+    connectable = create_engine(
+        get_url(),
         poolclass=pool.NullPool,
     )
-
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
