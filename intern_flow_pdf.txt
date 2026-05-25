@@ -1,0 +1,272 @@
+
+
+===== PAGE 1 =====
+
+ 
+Business Requirements Document (BRD) 
+Application Name: Intern Flow 
+Internship Program Automation (Unpaid Internships) 
+Version: 1.0 
+ 
+1. Executive Summary 
+Intern Flow is a centralized, workflow-driven platform designed to digitize, standardize, 
+and govern the end-to-end Unpaid Internship Program. 
+The system replaces fragmented email- and chat-based coordination with a secure, 
+auditable, AI-assisted portal that spans referral intake, candidate evaluation, 
+onboarding, access provisioning, internship lifecycle management, and closure. 
+The primary aim is to ensure speed, compliance, transparency, and accountability, 
+while significantly reducing manual coordination across Referrers, Mentors, HR, 
+Admin/Security, IT (AD), and Compliance teams. 
+ 
+2. Objectives & Success Criteria 
+2.1 Business Objectives 
+1. Digitize referral intake through a standardized internal portal. 
+2. Automate inter-department handoffs and notifications. 
+3. Leverage AI to:  
+o Parse resumes and prefill data 
+o Validate eligibility and readiness 
+o Detect duplicates and missing information 
+o Draft contextual communications 
+4. Ensure timely creation of Non-Worker IDs, NDA execution, and credential 
+provisioning. 
+5. Provide dashboards, SLA tracking, audit trails, and compliance reporting. 
+ 
+2.2 Success Measures 
+
+===== PAGE 2 =====
+
+ 
+Metric Target 
+Cycle time (Referral → Ready-to-start) ≥ 80% reduction 
+Data accuracy ≥ 95% 
+NDA compliance pre-start 100% 
+Non-Worker ID SLA ≤ 1 business day 
+Failed/bounced emails ≤ 1% 
+ 
+3. Scope 
+3.1 In Scope 
+• Internship referral intake portal 
+• Internship Referral Form automation 
+• AI-assisted resume parsing, deduplication, and prefill 
+• Automated notifications, tasks, reminders, and escalations 
+• Digital Joining Form with validations 
+• Non-Worker ID creation workflow 
+• NDA issuance via e-sign and archival 
+• Offer/confirmation letter generation 
+• Internship lifecycle tracking (start, delay, extension, closure) 
+• Certificate request and issuance 
+ 
+3.2 Out of Scope (Phase 1) 
+• Stipend or payroll processing 
+• Advanced intern performance appraisal 
+• LMS or external university system integrations 
+• Stipend compliance or financial modules 
+ 
+4. Stakeholders & Roles 
+
+===== PAGE 3 =====
+
+ 
+Role Responsibilities 
+Referrer (Employee) Submits referral, primary contact for candidate 
+Candidate (Intern) Completes joining form, signs NDA, participates in internship 
+Mentor (Employee) Defines project, guides intern, confirms start/end 
+HR Non-Worker ID, NDA issuance, letters, closure 
+Program Owner Governance, SLAs, escalation, reporting 
+Admin & Security Site access, badges, facilities coordination 
+IT / AD Team Account provisioning and deactivation 
+Legal / Compliance NDA template approval, data retention policies 
+ 
+5. Current-State (As-Is) Summary 
+The current process relies on: 
+• Informal referrals via email or Teams 
+• Manual document exchange 
+• Ad-hoc follow-ups for Non-Worker IDs, NDAs, and access 
+• Minimal audit trail and inconsistent SLA adherence 
+This leads to delays, compliance risk, duplicated effort, and poor visibility. 
+ 
+6. Future-State (To-Be) with AI Enablement 
+• Portal-based referral submission with validations 
+• AI-powered resume parsing and duplicate detection 
+• Workflow-driven task assignment across HR, IT, Admin 
+• Event-based email notifications and reminders 
+• Central dashboard for SLA, bottleneck, and compliance tracking 
+• Full audit trail across the internship lifecycle 
+ 
+
+===== PAGE 4 =====
+
+ 
+7. Functional Requirements 
+7.1 Referral Intake Portal 
+FR-1: Employees shall submit referrals exclusively through the Intern Flow portal. 
+Acceptance: Portal accessible via intranet; submissions logged with timestamps. 
+ 
+7.2 Internship Referral Form 
+FR-2: Capture all mandatory values (Section 9.1) with format validation. 
+Acceptance: Submission blocked until mandatory fields completed. 
+ 
+7.3 AI Resume Parsing & Prefill 
+FR-3: 
+• Extract candidate name, email, phone, education, skills 
+• Prefill referral form 
+• Confidence scoring with human override 
+Acceptance: ≥ 90% accuracy on basic fields; override tracked. 
+ 
+7.4 Eligibility & Readiness Checks 
+FR-4: 
+• Confirm unpaid consent 
+• Confirm in-person readiness 
+• Validate joining location alignment 
+Acceptance: Submission blocked if readiness flags not confirmed. 
+ 
+7.5 Joining & Onboarding 
+FR-6: Digital joining form with save-draft, validations, attachments, and HR lock. 
+FR-7: Auto-trigger Non-Worker ID task on joining form completion (SLA 1 day). 
+FR-8: NDA issued via e-sign; start blocked until signed. 
+ 
+7.6 Notifications & Communications 
+
+===== PAGE 5 =====
+
+ 
+• Congratulations email with mentor info 
+• Start confirmation 
+• Delay notifications with escalation after 3 reminders 
+• Admin/Security site access alerts 
+• Mutual connect prompts 
+• Closure/extension reminders 
+• Certificate request and issuance 
+ 
+7.7 Access & Credentials 
+FR-13: 
+• Secure AD credential delivery (OTP/magic link) 
+• Mentor receives full intern dossier 
+ 
+7.8 Closure & Certificate 
+FR-16–19: 
+• End reminders 
+• ID and AD deactivation 
+• Certificate request 
+• Certificate generation on letterhead and archival 
+ 
+8. Non-Functional Requirements 
+ID Area Requirement 
+NFR-1 Security RBAC, encryption, least privilege 
+NFR-2 Availability ≥ 99.5% uptime 
+NFR-3 Performance < 3s form load; < 5 min triggers 
+NFR-4 Audit Immutable event logs 
+
+===== PAGE 6 =====
+
+ 
+NFR-5 Usability WCAG 2.1 AA, mobile-friendly 
+NFR-6 Compliance Approved NDA, consent, retention 
+NFR-7 Scalability ≥ 500 concurrent users 
+ 
+9. Data Model – Forms & Fields 
+9.1 Internship Referral Form 
+(All fields mandatory unless configured optional) 
+• Candidate details 
+• Eligibility confirmations (unpaid, in-person) 
+• Referrer & Mentor details 
+• Internship duration, dates, project overview 
+• Relationship declaration 
+(Field list preserved exactly as supplied, with validations applied consistently.) 
+ 
+9.2 Joining Form 
+Includes: 
+• Personal details 
+• Employment identifiers (Non-Worker ID) 
+• Address & emergency contact 
+• Education & employment history 
+• Government IDs 
+• Declaration & signature 
+ 
+9.3 Certificate Request Form 
+Captured post-completion for certificate issuance. 
+ 
+10. Workflow & Notifications 
+
+===== PAGE 7 =====
+
+ 
+End-to-end flow from Step 1 to Step 17 fully automated, covering: 
+• Referral 
+• Onboarding 
+• Access 
+• Internship execution 
+• Closure and certification 
+Each step is: 
+• Event-driven 
+• Logged 
+• SLA-tracked 
+• Escalation-enabled 
+ 
+11. AI Enablement & Business Rules 
+• Resume parsing with human review 
+• Duplicate and eligibility detection 
+• Smart form validations 
+• Automated email drafting 
+• SLA risk prediction alerts 
+• Knowledge-base chatbot for FAQs 
+ 
+12. Integrations 
+• Internal portal/workflow engine 
+• Email & calendar services 
+• E-sign provider 
+• HR identity / Non-Worker ID system 
+• Active Directory 
+• Document repository 
+ 
+
+===== PAGE 8 =====
+
+ 
+13. Governance, SLAs & Reporting 
+• Non-Worker ID: ≤ 1 business day 
+• NDA: Signed ≥ 1 day before start 
+• AD deactivation: ≤ 24 hours post end 
+• Weekly dashboards:  
+o Stage counts 
+o SLA breaches 
+o Average cycle time 
+o Completion ratio 
+ 
+14. Risks & Mitigations 
+Risk Mitigation 
+Manual data errors AI prefill + validations 
+Delays in approvals Automated reminders & escalations 
+Access not removed Automated closure workflow 
+PII exposure RBAC, encryption, audit trails 
+ 
+15. Email Templates 
+(Professional, system-driven templates retained and standardized for branding and 
+compliance.) 
+ 
+16. Implementation Plan (High-Level) 
+Phase Duration 
+Design & Sign-off 2 weeks 
+Build & Workflow 3–4 weeks 
+Integrations 2–3 weeks 
+
+===== PAGE 9 =====
+
+ 
+UAT & Pilot 2 weeks 
+Go-Live & Hypercare 2 weeks 
+ 
+17. Assumptions & Dependencies 
+• Approved NDA and letterhead available 
+• HR authorized for Non-Worker ID & e-sign 
+• IT APIs accessible 
+• Escalation matrix defined by Program Owner 
+ 
+   Final Outcome 
+Intern Flow delivers a secure, compliant, AI-assisted internship automation 
+platform that: 
+• Reduces cycle time and manual effort 
+• Ensures legal and security compliance 
+• Provides leadership-level visibility 
+• Improves intern and employee experience 
+ 

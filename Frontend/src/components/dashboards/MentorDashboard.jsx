@@ -1,168 +1,293 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-function MentorDashboard({ token, currentUser, setError, setMessage }) {
+const NAV = [
+  { id: 'interns', label: 'My Interns' },
+  { id: 'pending', label: 'Pending Actions' },
+  { id: 'briefs', label: 'Project Briefs' },
+  { id: 'notifications', label: 'Notifications' },
+]
+
+function MentorDashboard({ token, currentUser, setError, setMessage, onLogout }) {
+  const [activeTab, setActiveTab] = useState('interns')
   const [referrals, setReferrals] = useState([])
+  const [selectedReferralId, setSelectedReferralId] = useState('')
+  const [timeline, setTimeline] = useState([])
+  const [certificateStatus, setCertificateStatus] = useState(null)
+  const [notice, setNotice] = useState({ type: '', text: '' })
   const [loading, setLoading] = useState(false)
-  const [selectedReferral, setSelectedReferral] = useState(null)
+  const [actionLoading, setActionLoading] = useState('')
 
-  const mockReferrals = [
-    {
-      id: '1',
-      candidate_name: 'John Doe',
-      candidate_email: 'john@example.com',
-      start_date: '2026-06-01',
-      end_date: '2026-08-31',
-      status: 'ELIGIBILITY_REVIEW',
-      project: 'Mobile App Development',
-    },
-    {
-      id: '2',
-      candidate_name: 'Jane Smith',
-      candidate_email: 'jane@example.com',
-      start_date: '2026-07-01',
-      end_date: '2026-09-30',
-      status: 'JOINING_FORM_PENDING',
-      project: 'Cloud Infrastructure',
-    },
-  ]
+  const apiRequest = async (path, options = {}) => {
+    const response = await fetch(`/api/v1${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        ...(options.headers || {}),
+      },
+    })
+    const text = await response.text()
+    const data = text ? JSON.parse(text) : null
+    if (!response.ok) {
+      throw new Error(data?.detail || 'Request failed')
+    }
+    return data
+  }
 
-  const handleApproveReferral = async (referralId) => {
+  const loadMentorReferrals = async () => {
+    setLoading(true)
     try {
-      setLoading(true)
-      // API call would go here
-      setMessage(`Referral ${referralId} approved`)
+      const list = await apiRequest('/referrals/me/mentor')
+      const mine = list.items || []
+      setReferrals(mine)
+      const nextId = selectedReferralId || mine[0]?.id || ''
+      setSelectedReferralId(nextId)
+      if (nextId) {
+        await Promise.all([loadTimeline(nextId), loadCertificate(nextId)])
+      }
     } catch (err) {
+      setNotice({ type: 'error', text: err.message || 'Failed to load mentor referrals' })
       setError(err.message)
     } finally {
       setLoading(false)
     }
   }
 
-  const handleRejectReferral = async (referralId) => {
+  const loadTimeline = async (referralId) => {
     try {
-      setLoading(true)
-      // API call would go here
-      setMessage(`Referral ${referralId} rejected`)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
+      const data = await apiRequest(`/referrals/${referralId}/timeline`)
+      setTimeline(data.events || [])
+    } catch {
+      setTimeline([])
     }
   }
 
-  const getStatusColor = (status) => {
-    const colors = {
-      ELIGIBILITY_REVIEW: 'bg-yellow-100 text-yellow-800',
-      JOINING_FORM_PENDING: 'bg-blue-100 text-blue-800',
-      IN_PROGRESS: 'bg-green-100 text-green-800',
-      COMPLETED: 'bg-gray-100 text-gray-800',
+  const loadCertificate = async (referralId) => {
+    try {
+      const data = await apiRequest(`/referrals/${referralId}/certificate`)
+      setCertificateStatus(data)
+    } catch {
+      setCertificateStatus(null)
     }
-    return colors[status] || 'bg-gray-100 text-gray-800'
+  }
+
+  useEffect(() => {
+    loadMentorReferrals()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, currentUser?.id])
+
+  const selectedReferral = useMemo(() => referrals.find((item) => item.id === selectedReferralId) || null, [referrals, selectedReferralId])
+
+  const pendingItems = useMemo(() => referrals.filter((item) => ['JOINING_FORM_SUBMITTED', 'READY_TO_START', 'IN_PROGRESS'].includes(item.state)), [referrals])
+
+  const handleConfirmInternStarted = async () => {
+    if (!selectedReferralId) return
+    setActionLoading('confirm-start')
+    try {
+      await apiRequest(`/referrals/${selectedReferralId}/state`, {
+        method: 'PUT',
+        body: JSON.stringify({ next_state: 'IN_PROGRESS', notes: 'Mentor confirmed internship start' }),
+      })
+      setMessage('Internship confirmed as started')
+      setNotice({ type: 'success', text: 'Intern marked as started successfully' })
+      await loadMentorReferrals()
+    } catch (err) {
+      setError(err.message)
+      setNotice({ type: 'error', text: err.message || 'Failed to confirm start' })
+    } finally {
+      setActionLoading('')
+    }
+  }
+
+  const handleRequestExtension = async () => {
+    if (!selectedReferralId) return
+    setActionLoading('extension')
+    try {
+      await apiRequest(`/referrals/${selectedReferralId}/state`, {
+        method: 'PUT',
+        body: JSON.stringify({ next_state: 'EXTENDED', notes: 'Mentor requested project extension' }),
+      })
+      setNotice({ type: 'success', text: 'Extension requested' })
+      await loadMentorReferrals()
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message })
+      setError(err.message)
+    } finally {
+      setActionLoading('')
+    }
+  }
+
+  const handleInitiateClosure = async () => {
+    if (!selectedReferralId) return
+    setActionLoading('closure')
+    try {
+      await apiRequest(`/referrals/${selectedReferralId}/state`, {
+        method: 'PUT',
+        body: JSON.stringify({ next_state: 'IN_CLOSURE', notes: 'Mentor initiated closure' }),
+      })
+      setNotice({ type: 'success', text: 'Closure initiated' })
+      await loadMentorReferrals()
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message })
+      setError(err.message)
+    } finally {
+      setActionLoading('')
+    }
   }
 
   return (
-    <div className="space-y-6">
-      <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-        <h2 className="text-xl font-semibold text-purple-900">Mentor Dashboard</h2>
-        <p className="text-purple-700 mt-1">Approve referrals and manage on-the-job training for your candidates</p>
-      </div>
+    <div className="flex min-h-screen overflow-hidden rounded-none border-none bg-white shadow-none">
+      <aside className="flex w-64 flex-col bg-[#07153a] text-white">
+        <div className="border-b border-white/10 p-6">
+          <p className="text-3xl font-bold tracking-tight text-indigo-300">Intern Flow</p>
+          <p className="mt-1 text-sm text-slate-300">MENTOR PORTAL</p>
+        </div>
+        <nav className="space-y-1 p-4">
+          {NAV.map((item) => (
+            <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full rounded-lg px-3 py-3 text-left text-lg font-semibold ${activeTab === item.id ? 'bg-indigo-700/30 text-indigo-300' : 'text-slate-200 hover:bg-white/10'}`}>
+              {item.label}
+              {item.id === 'pending' && pendingItems.length > 0 && <span className="ml-2 rounded-full bg-indigo-600 px-2 py-0.5 text-xs text-white">{pendingItems.length}</span>}
+            </button>
+          ))}
+        </nav>
+        <div className="mt-auto border-t border-white/10 p-4">
+          <div className="text-sm text-slate-300">
+            <p className="font-semibold text-white">{currentUser?.full_name || 'Mentor User'}</p>
+            <p>{currentUser?.department || 'Platform Team'}</p>
+          </div>
+          <button
+            onClick={onLogout}
+            className="mt-4 w-full rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
+          >
+            Logout
+          </button>
+        </div>
+      </aside>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <p className="text-gray-600 text-sm font-semibold">Pending Approval</p>
-          <p className="text-2xl font-bold text-purple-600 mt-2">2</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <p className="text-gray-600 text-sm font-semibold">In Progress</p>
-          <p className="text-2xl font-bold text-blue-600 mt-2">1</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <p className="text-gray-600 text-sm font-semibold">Completed</p>
-          <p className="text-2xl font-bold text-green-600 mt-2">3</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <p className="text-gray-600 text-sm font-semibold">Total Mentured</p>
-          <p className="text-2xl font-bold text-gray-600 mt-2">6</p>
-        </div>
-      </div>
+      <main className="flex-1 overflow-auto bg-slate-50">
+        <header className="border-b border-slate-200 bg-white px-8 py-6">
+          <h1 className="text-4xl font-bold text-slate-800">My Interns</h1>
+          <p className="mt-1 text-xl text-slate-500">Overview of active internships and required actions.</p>
+        </header>
 
-      {/* Referrals List */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-4">Candidate Referrals</h3>
+        {notice.text && (
+          <div className={`mx-8 mt-5 rounded-lg border px-4 py-3 text-sm ${notice.type === 'error' ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+            {notice.text}
+          </div>
+        )}
 
-        <div className="space-y-4">
-          {mockReferrals.map((referral) => (
-            <div
-              key={referral.id}
-              onClick={() => setSelectedReferral(selectedReferral?.id === referral.id ? null : referral)}
-              className="border border-gray-200 rounded-lg p-4 hover:border-purple-300 cursor-pointer transition"
-            >
-              <div className="flex items-start justify-between">
-                <div>
-                  <h4 className="font-semibold text-gray-900">{referral.candidate_name}</h4>
-                  <p className="text-gray-600 text-sm">{referral.candidate_email}</p>
-                  <p className="text-gray-600 text-sm mt-1">
-                    <span className="font-semibold">Project:</span> {referral.project}
-                  </p>
-                  <p className="text-gray-600 text-sm">
-                    <span className="font-semibold">Duration:</span> {referral.start_date} to {referral.end_date}
-                  </p>
+        {activeTab === 'interns' && (
+          <div className="space-y-6 p-8">
+            <div>
+              <h3 className="text-3xl font-bold text-slate-800">Requires Attention</h3>
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-2xl border-l-4 border-amber-500 bg-white p-5 shadow-sm">
+                  <p className="text-2xl font-bold text-slate-800">Confirm Start Date</p>
+                  <p className="text-sm text-slate-500">Intern reports starting today.</p>
+                  <button onClick={handleConfirmInternStarted} disabled={actionLoading === 'confirm-start' || !selectedReferralId} className="mt-3 w-full rounded-lg bg-indigo-600 py-2 text-sm font-semibold text-white">{actionLoading === 'confirm-start' ? 'Confirming...' : 'Confirm Onboarding'}</button>
                 </div>
-                <span className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${getStatusColor(referral.status)}`}>
-                  {referral.status}
-                </span>
+                <div className="rounded-2xl border-l-4 border-amber-500 bg-white p-5 shadow-sm">
+                  <p className="text-2xl font-bold text-slate-800">Review Joining Form</p>
+                  <p className="text-sm text-slate-500">Candidate has submitted documents.</p>
+                  <button onClick={() => setActiveTab('briefs')} className="mt-3 w-full rounded-lg border border-slate-300 py-2 text-sm font-semibold text-slate-700">Review Documents</button>
+                </div>
               </div>
+            </div>
 
-              {selectedReferral?.id === referral.id && (
-                <div className="mt-4 pt-4 border-t border-gray-200 space-y-3">
-                  {referral.status === 'ELIGIBILITY_REVIEW' && (
-                    <div>
-                      <p className="text-sm text-gray-600 mb-3">Review eligibility criteria and approve or reject:</p>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleApproveReferral(referral.id)}
-                          disabled={loading}
-                          className="flex-1 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition disabled:bg-gray-400"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          onClick={() => handleRejectReferral(referral.id)}
-                          disabled={loading}
-                          className="flex-1 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition disabled:bg-gray-400"
-                        >
-                          Reject
-                        </button>
+            <div className="rounded-2xl border bg-white p-6">
+              <h3 className="mb-4 text-3xl font-bold text-slate-800">Active Interns</h3>
+              <div className="space-y-4">
+                {referrals.map((r, idx) => (
+                  <div key={r.id} className="rounded-xl border border-slate-200 p-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-2xl font-bold text-slate-800">Intern #{idx + 1}</p>
+                        <p className="text-sm text-slate-500">{r.project_overview || 'Project details pending'}</p>
+                        <p className="text-sm text-slate-500">{r.start_date || 'Start TBD'} - {r.end_date || 'End TBD'}</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">{r.state}</span>
+                        <div className="mt-3 space-y-2">
+                          <button onClick={() => { setSelectedReferralId(r.id); setActiveTab('briefs') }} className="block rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">View Profile</button>
+                          <button onClick={() => { setSelectedReferralId(r.id); setActiveTab('briefs') }} className="block rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">Project Brief</button>
+                        </div>
                       </div>
                     </div>
-                  )}
-
-                  {referral.status === 'IN_PROGRESS' && (
-                    <div>
-                      <p className="text-sm text-gray-600 mb-3">Add on-the-job training notes:</p>
-                      <textarea
-                        placeholder="Enter training progress, feedback, or notes here..."
-                        className="w-full border border-gray-300 rounded p-2 text-sm"
-                        rows="3"
-                      />
-                      <button className="mt-2 bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition">
-                        Save Notes
-                      </button>
-                    </div>
-                  )}
-
-                  {referral.status === 'COMPLETED' && (
-                    <div className="bg-green-50 border border-green-200 rounded p-3">
-                      <p className="text-green-800 text-sm">This internship has been completed. Great work!</p>
-                    </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                ))}
+                {!referrals.length && <p className="text-sm text-slate-500">No interns assigned yet.</p>}
+              </div>
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
+        )}
+
+        {(activeTab === 'briefs' || activeTab === 'pending' || activeTab === 'notifications') && (
+          <div className="grid gap-6 p-8 lg:grid-cols-[2fr_1fr]">
+            <div className="space-y-6">
+              <div className="rounded-2xl border bg-white p-6">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-4xl font-bold text-slate-800">{selectedReferral?.project_overview || "Project Brief"}</h3>
+                  <button className="text-sm font-semibold text-indigo-600">Edit Brief</button>
+                </div>
+                <p className="text-lg font-semibold text-slate-800">Objective</p>
+                <p className="mt-2 text-sm text-slate-600">{selectedReferral?.project_overview || 'Design and implement assigned module with secure, scalable best practices.'}</p>
+
+                <p className="mt-6 text-lg font-semibold text-slate-800">Key Deliverables</p>
+                <ul className="mt-2 list-disc pl-5 text-sm text-slate-600">
+                  <li>Architecture and implementation document</li>
+                  <li>Production-ready service implementation</li>
+                  <li>Integration and load test artifacts</li>
+                  <li>Monitoring dashboard setup</li>
+                </ul>
+
+                <p className="mt-6 text-lg font-semibold text-slate-800">Tech Stack</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {['Go', 'Redis', 'gRPC', 'Docker'].map((tech) => (
+                    <span key={tech} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{tech}</span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-white p-6">
+                <h4 className="text-3xl font-bold text-slate-800">Milestone Tracker</h4>
+                <p className="text-sm text-slate-500">Track progress against the 12-week timeline.</p>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4"><p className="font-semibold text-emerald-800">Design & Architecture</p><p className="text-sm text-emerald-700">Completed</p></div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="font-semibold text-slate-700">Implementation</p><p className="text-sm text-slate-500">In Progress</p></div>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <div className="rounded-2xl border bg-white p-6">
+                <p className="text-2xl font-bold text-slate-800">Intern Summary</p>
+                <p className="mt-2 text-sm text-slate-500">{selectedReferral?.id || 'Select an intern from My Interns'}</p>
+                <p className="mt-1 text-sm text-slate-500">Certificate: {certificateStatus?.status || 'Not requested'}</p>
+                <div className="mt-4 space-y-2">
+                  <button onClick={handleRequestExtension} disabled={actionLoading === 'extension' || !selectedReferralId} className="w-full rounded-lg border border-slate-300 py-2 text-sm font-semibold text-slate-700">{actionLoading === 'extension' ? 'Requesting...' : 'Request Extension'}</button>
+                  <button onClick={handleInitiateClosure} disabled={actionLoading === 'closure' || !selectedReferralId} className="w-full rounded-lg bg-[#0b1638] py-2 text-sm font-semibold text-white">{actionLoading === 'closure' ? 'Initiating...' : 'Initiate Closure'}</button>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-white p-6">
+                <p className="text-2xl font-bold text-slate-800">Required Action</p>
+                <p className="mt-2 text-sm text-slate-600">Confirm intern start to trigger IT access provisioning.</p>
+                <button onClick={handleConfirmInternStarted} disabled={actionLoading === 'confirm-start' || !selectedReferralId} className="mt-3 w-full rounded-lg bg-indigo-600 py-2 text-sm font-semibold text-white">Confirm Intern Started</button>
+              </div>
+
+              <div className="rounded-2xl border bg-white p-6">
+                <p className="text-2xl font-bold text-slate-800">Dossier & Documents</p>
+                <div className="mt-3 space-y-2 text-sm text-slate-600">
+                  <p>Joining Form: Submitted</p>
+                  <p>NDA: {timeline.some((event) => event.event_type?.includes('NDA_SIGNED')) ? 'Signed' : 'Pending'}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {loading && <div className="px-8 pb-8 text-sm text-slate-500">Loading mentor data...</div>}
+      </main>
     </div>
   )
 }

@@ -111,6 +111,8 @@ const EMPTY_NDA_SEND = {
 }
 
 function App() {
+  const [showAuthPanel, setShowAuthPanel] = useState(false)
+  const [showAboutModal, setShowAboutModal] = useState(false)
   const [registerForm, setRegisterForm] = useState(EMPTY_REGISTER)
   const [loginForm, setLoginForm] = useState(EMPTY_LOGIN)
   const [claimForm, setClaimForm] = useState(EMPTY_CLAIM)
@@ -345,6 +347,7 @@ function App() {
     setSelectedReferralId('')
     setMessage('Logged out')
     setError('')
+    setShowAuthPanel(false)
   }
 
   const handleCreateReferral = async (event) => {
@@ -681,38 +684,93 @@ function App() {
 
   const statusTone = selectedReferral?.state || 'Workflow ready'
 
+  // Show full-screen dashboard if user is logged in with a valid role
+  const isLoggedInWithRole = token && currentUser && ['referrer', 'candidate', 'mentor', 'hr', 'admin', 'manager'].includes(currentUser.role)
+
+  if (isLoggedInWithRole) {
+    return (
+      <div className="min-h-screen w-full bg-slate-50 text-slate-900">
+        {currentUser.role === 'referrer' && (
+          <ReferrerDashboard
+            token={token}
+            currentUser={currentUser}
+            onLogout={handleLogout}
+          />
+        )}
+        {currentUser.role === 'candidate' && (
+          <CandidateDashboard
+            token={token}
+            currentUser={currentUser}
+            setError={setError}
+            setMessage={setMessage}
+            onLogout={handleLogout}
+          />
+        )}
+        {currentUser.role === 'mentor' && (
+          <MentorDashboard
+            token={token}
+            currentUser={currentUser}
+            setError={setError}
+            setMessage={setMessage}
+            onLogout={handleLogout}
+          />
+        )}
+        {currentUser.role === 'hr' && (
+          <HRDashboard
+            token={token}
+            currentUser={currentUser}
+            setError={setError}
+            setMessage={setMessage}
+            onLogout={handleLogout}
+          />
+        )}
+        {(currentUser.role === 'admin' || currentUser.role === 'manager') && (
+          <ManagerDashboard
+            token={token}
+            currentUser={currentUser}
+            setError={setError}
+            setMessage={setMessage}
+            onLogout={handleLogout}
+          />
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(242,102,34,0.24),_transparent_35%),radial-gradient(circle_at_top_right,_rgba(255,214,102,0.22),_transparent_28%),linear-gradient(180deg,_#08111f_0%,_#0b1220_42%,_#f5f7fb_42%,_#f5f7fb_100%)] text-slate-900">
       <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-4 py-6 md:px-6 lg:px-8">
-        <header className="overflow-hidden rounded-[2rem] border border-white/10 bg-white/8 p-6 text-white shadow-[0_20px_70px_rgba(2,8,23,0.35)] backdrop-blur-xl">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl">
-              <div className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
-                Intern Flow • Backend ready
+        {!token && !currentUser && !showAuthPanel && (
+          <header className="overflow-hidden rounded-[2rem] border border-white/10 bg-white/8 p-6 text-white shadow-[0_20px_70px_rgba(2,8,23,0.35)] backdrop-blur-xl">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-3xl">
+                <div className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
+                  Intern Flow • Backend ready
+                </div>
+                <h1 className="mt-4 text-4xl font-black tracking-tight md:text-6xl">
+                  Referral automation, rebuilt for the internship lifecycle.
+                </h1>
+                <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 md:text-base">
+                  Register users, log in as the referrer, create referrals, run eligibility checks, and drive workflow state transitions from one compact workspace.
+                </p>
               </div>
-              <h1 className="mt-4 text-4xl font-black tracking-tight md:text-6xl">
-                Referral automation, rebuilt for the internship lifecycle.
-              </h1>
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 md:text-base">
-                Register users, log in as the referrer, create referrals, run eligibility checks, and drive workflow state transitions from one compact workspace.
-              </p>
+              <div className="grid gap-3 rounded-3xl border border-white/10 bg-slate-950/40 p-4 text-sm text-slate-200 md:grid-cols-3 lg:min-w-[360px]">
+                <div>
+                  <div className="text-slate-400">Session</div>
+                  <div className="mt-1 font-semibold">{currentUser ? currentUser.full_name : 'Not signed in'}</div>
+                </div>
+                <div>
+                  <div className="text-slate-400">Role</div>
+                  <div className="mt-1 font-semibold">{currentUser ? currentUser.role : 'Guest'}</div>
+                </div>
+                <div>
+                  <div className="text-slate-400">Referral state</div>
+                  <div className="mt-1 font-semibold">{statusTone}</div>
+                </div>
+              </div>
             </div>
-            <div className="grid gap-3 rounded-3xl border border-white/10 bg-slate-950/40 p-4 text-sm text-slate-200 md:grid-cols-3 lg:min-w-[360px]">
-              <div>
-                <div className="text-slate-400">Session</div>
-                <div className="mt-1 font-semibold">{currentUser ? currentUser.full_name : 'Not signed in'}</div>
-              </div>
-              <div>
-                <div className="text-slate-400">Role</div>
-                <div className="mt-1 font-semibold">{currentUser ? currentUser.role : 'Guest'}</div>
-              </div>
-              <div>
-                <div className="text-slate-400">Referral state</div>
-                <div className="mt-1 font-semibold">{statusTone}</div>
-              </div>
-            </div>
-          </div>
-        </header>
+          </header>
+        )}
 
         {(message || error) && (
           <div
@@ -728,101 +786,190 @@ function App() {
 
         <main className="space-y-6">
           {!token || !currentUser ? (
-            <AuthSection
-              registerForm={registerForm}
-              loginForm={loginForm}
-              claimForm={claimForm}
-              currentUser={currentUser}
-              loading={loading}
-              roleOptions={ROLE_OPTIONS}
-              handleRegister={handleRegister}
-              handleRegisterChange={handleRegisterChange}
-              handleLogin={handleLogin}
-              handleLoginChange={handleLoginChange}
-              handleClaimAccount={handleClaimAccount}
-              handleClaimChange={handleClaimChange}
-              handleLogout={handleLogout}
-            />
-          ) : currentUser.role === 'referrer' ? (
-            <ReferrerDashboard
-              token={token}
-              loading={loading}
-              selectedReferralId={selectedReferralId}
-              referralForm={referralForm}
-              eligibilityForm={eligibilityForm}
-              transitionForm={transitionForm}
-              nextStates={NEXT_STATES}
-              joiningForm={joiningForm}
-              joiningFormData={joiningFormData}
-              joiningFormLoading={joiningFormLoading}
-              ndaSendForm={ndaSendForm}
-              ndaDetails={ndaDetails}
-              ndaLoading={ndaLoading}
-              currentUserRole={currentUser?.role || ''}
-              canIssueNda={canIssueNda}
-              canSignNda={canSignNda}
-              canRejectNda={canRejectNda}
-              canExpireNda={canExpireNda}
-              handleReferralChange={handleReferralChange}
-              handleCreateReferral={handleCreateReferral}
-              handleEligibilityChange={handleEligibilityChange}
-              handleEligibilitySubmit={handleEligibilitySubmit}
-              handleTransitionChange={handleTransitionChange}
-              handleStateTransition={handleStateTransition}
-              handleJoiningFormPersonalChange={handleJoiningFormPersonalChange}
-              handleJoiningFormAddressChange={handleJoiningFormAddressChange}
-              handleJoiningFormEmergencyChange={handleJoiningFormEmergencyChange}
-              setJoiningForm={setJoiningForm}
-              handleJoiningFormSaveDraft={handleJoiningFormSaveDraft}
-              handleJoiningFormSubmit={handleJoiningFormSubmit}
-              handleNdaSendChange={handleNdaSendChange}
-              handleSendNda={handleSendNda}
-              handleSignNda={handleSignNda}
-              handleRejectNda={handleRejectNda}
-              handleExpireNda={handleExpireNda}
-            />
-          ) : currentUser.role === 'candidate' ? (
-            <CandidateDashboard
-              token={token}
-              currentUser={currentUser}
-              setError={setError}
-              setMessage={setMessage}
-            />
-          ) : currentUser.role === 'mentor' ? (
-            <MentorDashboard
-              token={token}
-              currentUser={currentUser}
-              setError={setError}
-              setMessage={setMessage}
-            />
-          ) : currentUser.role === 'hr' ? (
-            <HRDashboard
-              token={token}
-              currentUser={currentUser}
-              setError={setError}
-              setMessage={setMessage}
-            />
-          ) : currentUser.role === 'manager' ? (
-            <ManagerDashboard
-              token={token}
-              currentUser={currentUser}
-              setError={setError}
-              setMessage={setMessage}
-            />
-          ) : (
-            <div className="rounded-lg border border-gray-300 bg-gray-50 p-6">
-              <h2 className="text-xl font-semibold text-gray-900">Unknown Role</h2>
-              <p className="mt-2 text-gray-600">Your role is not recognized. Please contact support.</p>
-            </div>
-          )}
-          <div className="flex justify-end">
-            <button
-              onClick={handleLogout}
-              className="rounded-lg bg-red-600 px-4 py-2 text-white font-semibold hover:bg-red-700 transition"
-            >
-              Logout
-            </button>
-          </div>
+            showAuthPanel ? (
+              <>
+                <div className="flex items-center justify-end">
+                  <button
+                    onClick={() => setShowAuthPanel(false)}
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Back to Home
+                  </button>
+                </div>
+                <AuthSection
+                  registerForm={registerForm}
+                  loginForm={loginForm}
+                  claimForm={claimForm}
+                  currentUser={currentUser}
+                  loading={loading}
+                  roleOptions={ROLE_OPTIONS}
+                  handleRegister={handleRegister}
+                  handleRegisterChange={handleRegisterChange}
+                  handleLogin={handleLogin}
+                  handleLoginChange={handleLoginChange}
+                  handleClaimAccount={handleClaimAccount}
+                  handleClaimChange={handleClaimChange}
+                  handleLogout={handleLogout}
+                />
+              </>
+            ) : (
+              <>
+                <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+                  <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
+                    <div>
+                      <div className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-orange-700">
+                        Intern Flow BRD • Version 1.0
+                      </div>
+                      <h2 className="mt-4 text-3xl font-black tracking-tight text-slate-900 md:text-4xl">
+                        AI-assisted internship automation for Hexaware's unpaid internship lifecycle.
+                      </h2>
+                      <p className="mt-4 text-slate-600 leading-7">
+                        Intern Flow is a centralized, workflow-driven platform to digitize and govern end-to-end
+                        internship operations. It replaces fragmented email and chat coordination with secure,
+                        auditable process automation across referral intake, onboarding, access provisioning,
+                        lifecycle tracking, and closure.
+                      </p>
+                      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Cycle Time</p>
+                          <p className="mt-1 text-xl font-black text-slate-800">80%+</p>
+                          <p className="text-xs text-slate-600">Referral to ready-to-start reduction target</p>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Data Accuracy</p>
+                          <p className="mt-1 text-xl font-black text-slate-800">95%+</p>
+                          <p className="text-xs text-slate-600">Validation-driven referral and onboarding records</p>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">NDA Compliance</p>
+                          <p className="mt-1 text-xl font-black text-slate-800">100%</p>
+                          <p className="text-xs text-slate-600">Pre-start NDA completion requirement</p>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Non-Worker ID SLA</p>
+                          <p className="mt-1 text-xl font-black text-slate-800">1 Day</p>
+                          <p className="text-xs text-slate-600">Provisioning turnaround objective</p>
+                        </div>
+                      </div>
+                      <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <p className="text-sm font-semibold text-slate-800">Core AI Enablement</p>
+                        <p className="mt-1 text-sm text-slate-600">
+                          Resume parsing and prefill, eligibility validation, duplicate detection,
+                          smart form validations, contextual communication drafts, and SLA risk alerts.
+                        </p>
+                      </div>
+                      <div className="mt-8 flex flex-wrap gap-3">
+                        <button
+                          onClick={() => {
+                            setShowAboutModal(false)
+                            setShowAuthPanel(true)
+                          }}
+                          className="rounded-2xl bg-slate-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+                        >
+                          Register/Sign In
+                        </button>
+                        <button
+                          onClick={() => setShowAboutModal(true)}
+                          className="rounded-2xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                        >
+                          About Intern Flow
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-900 to-slate-700 p-6 text-white shadow-lg">
+                      <h3 className="text-lg font-bold">Workflow Scope</h3>
+                      <ul className="mt-4 space-y-3 text-sm text-slate-200">
+                        <li>• Referral intake portal and AI-assisted data capture</li>
+                        <li>• Digital joining form with save-draft and validations</li>
+                        <li>• NDA issuance, e-sign, and archival controls</li>
+                        <li>• Non-Worker ID and AD credential provisioning flow</li>
+                        <li>• Start, delay, extension, closure, and certification tracking</li>
+                        <li>• SLA dashboards, audit trails, and compliance reporting</li>
+                      </ul>
+                      <div className="mt-5 rounded-xl border border-white/20 bg-white/10 p-3 text-xs text-slate-100">
+                        Final Outcome: faster cycle times, stronger legal/security compliance,
+                        leadership-level visibility, and improved intern/employee experience.
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                {showAboutModal && (
+                  <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4"
+                    onClick={() => setShowAboutModal(false)}
+                  >
+                    <div
+                      className="max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl md:p-8"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-orange-600">About Intern Flow</p>
+                          <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-900">Internship Workflow Automation at Enterprise Scale</h3>
+                        </div>
+                        <button
+                          onClick={() => setShowAboutModal(false)}
+                          className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                        >
+                          Close
+                        </button>
+                      </div>
+
+                      <div className="mt-6 space-y-5 text-sm text-slate-700">
+                        <div>
+                          <p className="font-semibold text-slate-900">Executive Summary</p>
+                          <p className="mt-1 leading-6">
+                            Intern Flow transforms manual internship coordination into a unified, auditable workflow.
+                            The platform streamlines referral intake, joining formalities, NDA execution, and access
+                            provisioning while preserving governance and traceability.
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="font-semibold text-slate-900">Primary Objectives</p>
+                          <ul className="mt-2 space-y-1.5">
+                            <li>• Reduce referral-to-start processing time through automated workflows.</li>
+                            <li>• Improve data quality with structured forms and validation checkpoints.</li>
+                            <li>• Enforce policy, security, and legal compliance throughout the lifecycle.</li>
+                          </ul>
+                        </div>
+
+                        <div>
+                          <p className="font-semibold text-slate-900">Scope Coverage</p>
+                          <ul className="mt-2 space-y-1.5">
+                            <li>• Referral registration, role-based reviews, and eligibility controls.</li>
+                            <li>• Candidate joining form, NDA e-sign orchestration, and document readiness.</li>
+                            <li>• Non-Worker ID and AD provisioning milestones with SLA monitoring.</li>
+                            <li>• Start, delay, extension, closure, and completion certification visibility.</li>
+                          </ul>
+                        </div>
+
+                        <div>
+                          <p className="font-semibold text-slate-900">Key Stakeholders</p>
+                          <p className="mt-1 leading-6">
+                            Referrers, candidates, mentors, HR operations, and admin leadership collaborate through
+                            one source of truth with role-specific views and permissions.
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <p className="font-semibold text-slate-900">Target Success Metrics</p>
+                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                            <p>• 80%+ faster referral-to-ready cycle</p>
+                            <p>• 95%+ onboarding data accuracy</p>
+                            <p>• 100% NDA-before-start compliance</p>
+                            <p>• 1-day non-worker provisioning SLA</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )
+          ) : null}
         </main>
       </div>
     </div>

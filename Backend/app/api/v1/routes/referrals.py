@@ -12,10 +12,13 @@ from app.models.user import User
 from app.schemas.referral import (
     EligibilityCheckRequest,
     ReferralCreate,
+    ReferralHoldRequest,
     ReferralListResponse,
+    ReferralReassignMentorRequest,
     ReferralResponse,
     ReferralTimelineResponse,
     ReferralStateTransitionRequest,
+    ReferralUnholdRequest,
     ReferralUpdate,
     WorkflowEventResponse,
 )
@@ -30,6 +33,15 @@ def _serialize_referral(referral) -> ReferralResponse:
 
 def _serialize_event(event) -> WorkflowEventResponse:
     return WorkflowEventResponse.model_validate(event)
+
+
+def _list_response(items, total: int, skip: int, limit: int) -> ReferralListResponse:
+    return ReferralListResponse(
+        items=[_serialize_referral(item) for item in items],
+        total=total,
+        skip=skip,
+        limit=limit,
+    )
 
 
 @router.post("", response_model=ReferralResponse, status_code=status.HTTP_201_CREATED)
@@ -80,12 +92,113 @@ def list_referrals(
     }
 
     items, total = ReferralService.list_referrals(db=db, filters=filters, skip=skip, limit=limit)
-    return ReferralListResponse(
-        items=[_serialize_referral(item) for item in items],
-        total=total,
+    return _list_response(items=items, total=total, skip=skip, limit=limit)
+
+
+@router.get("/me/candidate", response_model=ReferralListResponse)
+def list_my_candidate_referrals(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("candidate", "admin")),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+):
+    current_user_id = cast(UUID, current_user.id)
+    current_user_role = cast(str, current_user.role)
+    if current_user_role == "admin":
+        items, total = ReferralService.list_referrals(db=db, filters=None, skip=skip, limit=limit)
+        return _list_response(items=items, total=total, skip=skip, limit=limit)
+
+    items, total = ReferralService.list_my_candidate_referrals(
+        db=db,
+        candidate_id=current_user_id,
         skip=skip,
         limit=limit,
     )
+    return _list_response(items=items, total=total, skip=skip, limit=limit)
+
+
+@router.get("/me/mentor", response_model=ReferralListResponse)
+def list_my_mentor_referrals(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("mentor", "admin")),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    state: str | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+):
+    current_user_id = cast(UUID, current_user.id)
+    current_user_role = cast(str, current_user.role)
+    if current_user_role == "admin":
+        filters = {
+            key: value
+            for key, value in {
+                "state": state,
+                "status": status_filter,
+            }.items()
+            if value is not None
+        }
+        items, total = ReferralService.list_referrals(db=db, filters=filters, skip=skip, limit=limit)
+        return _list_response(items=items, total=total, skip=skip, limit=limit)
+
+    items, total = ReferralService.list_my_mentor_referrals(
+        db=db,
+        mentor_id=current_user_id,
+        skip=skip,
+        limit=limit,
+        state=state,
+        status_filter=status_filter,
+    )
+    return _list_response(items=items, total=total, skip=skip, limit=limit)
+
+
+@router.get("/me/referrer", response_model=ReferralListResponse)
+def list_my_referrer_referrals(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("referrer", "admin")),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    state: str | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+):
+    current_user_id = cast(UUID, current_user.id)
+    current_user_role = cast(str, current_user.role)
+    if current_user_role == "admin":
+        filters = {
+            key: value
+            for key, value in {
+                "state": state,
+                "status": status_filter,
+            }.items()
+            if value is not None
+        }
+        items, total = ReferralService.list_referrals(db=db, filters=filters, skip=skip, limit=limit)
+        return _list_response(items=items, total=total, skip=skip, limit=limit)
+
+    items, total = ReferralService.list_my_referrer_referrals(
+        db=db,
+        referrer_id=current_user_id,
+        skip=skip,
+        limit=limit,
+        state=state,
+        status_filter=status_filter,
+    )
+    return _list_response(items=items, total=total, skip=skip, limit=limit)
+
+
+@router.get("/hr/queue", response_model=ReferralListResponse)
+def list_hr_queue(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("hr", "admin")),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+):
+    current_user_role = cast(str, current_user.role)
+    if current_user_role == "admin":
+        items, total = ReferralService.list_referrals(db=db, filters=None, skip=skip, limit=limit)
+        return _list_response(items=items, total=total, skip=skip, limit=limit)
+
+    items, total = ReferralService.list_hr_queue(db=db, skip=skip, limit=limit)
+    return _list_response(items=items, total=total, skip=skip, limit=limit)
 
 
 @router.get("/{referral_id}", response_model=ReferralResponse)
@@ -171,6 +284,79 @@ def transition_referral_state(
         return _serialize_referral(referral)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post("/{referral_id}/reassign-mentor", response_model=ReferralResponse)
+def reassign_referral_mentor(
+    referral_id: UUID,
+    payload: ReferralReassignMentorRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("hr", "admin", "program_owner")),
+):
+    try:
+        referral = ReferralService.reassign_mentor(
+            db=db,
+            referral_id=referral_id,
+            mentor_email=payload.mentor_email,
+            triggered_by=cast(UUID, current_user.id),
+            triggered_by_role=cast(str, current_user.role),
+            notes=payload.notes,
+        )
+        return _serialize_referral(referral)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post("/{referral_id}/hold", response_model=ReferralResponse)
+def hold_referral(
+    referral_id: UUID,
+    payload: ReferralHoldRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("hr", "admin", "program_owner")),
+):
+    try:
+        referral = ReferralService.hold_referral(
+            db=db,
+            referral_id=referral_id,
+            triggered_by=cast(UUID, current_user.id),
+            triggered_by_role=cast(str, current_user.role),
+            reason=payload.reason,
+        )
+        return _serialize_referral(referral)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post("/{referral_id}/unhold", response_model=ReferralResponse)
+def unhold_referral(
+    referral_id: UUID,
+    payload: ReferralUnholdRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("hr", "admin", "program_owner")),
+):
+    try:
+        referral = ReferralService.unhold_referral(
+            db=db,
+            referral_id=referral_id,
+            triggered_by=cast(UUID, current_user.id),
+            triggered_by_role=cast(str, current_user.role),
+            reason=payload.reason,
+        )
+        return _serialize_referral(referral)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 

@@ -66,6 +66,19 @@ class ReferralStateTransitionRequest(BaseModel):
     notes: str | None = None
 
 
+class ReferralReassignMentorRequest(BaseModel):
+    mentor_email: EmailStr
+    notes: str | None = None
+
+
+class ReferralHoldRequest(BaseModel):
+    reason: str = Field(min_length=1)
+
+
+class ReferralUnholdRequest(BaseModel):
+    reason: str | None = None
+
+
 class WorkflowEventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

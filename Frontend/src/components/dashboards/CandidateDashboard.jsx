@@ -1,134 +1,375 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-function CandidateDashboard({ token, currentUser, setError, setMessage }) {
-  const [activeTask, setActiveTask] = useState('joining-form')
+const EMPTY_JOINING_FORM = {
+  personal_details: { name: '', email: '', date_of_birth: '', phone: '', gender: '', nationality: '' },
+  address: { street: '', city: '', state: '', zip_code: '', country: '' },
+  emergency_contact: { name: '', phone: '', relationship: '' },
+  education_history: [],
+  employment_history: [],
+  government_ids: [],
+  declarations_signed: true,
+}
 
-  const tasks = [
-    {
-      id: 'joining-form',
-      title: 'Joining Form',
-      status: 'pending',
-      description: 'Complete your personal details and employment history',
-      icon: '📋',
-    },
-    {
-      id: 'nda',
-      title: 'NDA Signing',
-      status: 'pending',
-      description: 'Review and sign the Non-Disclosure Agreement',
-      icon: '📝',
-    },
-    {
-      id: 'non-worker-id',
-      title: 'Non-Worker ID',
-      status: 'pending',
-      description: 'Receive and verify your non-worker identification',
-      icon: '🆔',
-    },
-    {
-      id: 'certificate',
-      title: 'Completion Certificate',
-      status: 'pending',
-      description: 'Request certificate upon internship completion',
-      icon: '🏆',
-    },
-  ]
+const NAV = [
+  { id: 'status', label: 'My Status' },
+  { id: 'documents', label: 'My Documents' },
+  { id: 'nda', label: 'NDA' },
+  { id: 'contact', label: 'Contact HR' },
+]
+
+const STEP_FLOW = ['Referral Submitted', 'Eligibility Confirmed', 'Joining Form', 'NDA Signed', 'ID Provisioned', 'Active']
+
+function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout }) {
+  const [activeTab, setActiveTab] = useState('status')
+  const [loading, setLoading] = useState(false)
+  const [actionLoading, setActionLoading] = useState('')
+  const [notice, setNotice] = useState({ type: '', text: '' })
+  const [myReferrals, setMyReferrals] = useState([])
+  const [selectedReferralId, setSelectedReferralId] = useState('')
+  const [joiningForm, setJoiningForm] = useState(EMPTY_JOINING_FORM)
+  const [nda, setNda] = useState(null)
+  const [nonWorker, setNonWorker] = useState(null)
+  const [certificate, setCertificate] = useState(null)
+  const [governmentIdType, setGovernmentIdType] = useState('PAN Card')
+  const [governmentIdNumber, setGovernmentIdNumber] = useState('')
+  const [uploadedIdDoc, setUploadedIdDoc] = useState('')
+
+  const apiRequest = async (path, options = {}) => {
+    const response = await fetch(`/api/v1${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        ...(options.headers || {}),
+      },
+    })
+    const text = await response.text()
+    const data = text ? JSON.parse(text) : null
+    if (!response.ok) {
+      throw new Error(data?.detail || 'Request failed')
+    }
+    return data
+  }
+
+  const selectedReferral = useMemo(() => myReferrals.find((item) => item.id === selectedReferralId) || null, [myReferrals, selectedReferralId])
+
+  const stepIndex = useMemo(() => {
+    const state = selectedReferral?.state || 'SUBMITTED'
+    const map = {
+      SUBMITTED: 1,
+      ELIGIBILITY_PASSED: 2,
+      JOINING_FORM_PENDING: 3,
+      JOINING_FORM_SUBMITTED: 3,
+      NDA_PENDING: 4,
+      NDA_SIGNED: 4,
+      NON_WORKER_ID_PENDING: 5,
+      CREDENTIALS_GENERATED: 5,
+      READY_TO_START: 6,
+      IN_PROGRESS: 6,
+      CLOSED: 6,
+    }
+    return map[state] || 1
+  }, [selectedReferral])
+
+  const refreshCandidateData = async () => {
+    setLoading(true)
+    setNotice({ type: '', text: '' })
+    setError('')
+    try {
+      const list = await apiRequest('/referrals/me/candidate')
+      const mine = list.items || []
+      setMyReferrals(mine)
+      const activeId = selectedReferralId || mine[0]?.id || ''
+      setSelectedReferralId(activeId)
+      if (!activeId) return
+      await Promise.all([loadJoiningForm(activeId), loadNda(activeId), loadNonWorker(activeId), loadCertificate(activeId)])
+    } catch (err) {
+      setError(err.message)
+      setNotice({ type: 'error', text: err.message || 'Failed to load candidate data' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadJoiningForm = async (referralId) => {
+    try {
+      const form = await apiRequest(`/referrals/${referralId}/joining-form`)
+      setJoiningForm({ ...EMPTY_JOINING_FORM, ...form })
+    } catch {
+      setJoiningForm(EMPTY_JOINING_FORM)
+    }
+  }
+
+  const loadNda = async (referralId) => {
+    try {
+      const data = await apiRequest(`/referrals/${referralId}/nda`)
+      setNda(data)
+    } catch {
+      setNda(null)
+    }
+  }
+
+  const loadNonWorker = async (referralId) => {
+    try {
+      const data = await apiRequest(`/referrals/${referralId}/non-worker`)
+      setNonWorker(data)
+    } catch {
+      setNonWorker(null)
+    }
+  }
+
+  const loadCertificate = async (referralId) => {
+    try {
+      const data = await apiRequest(`/referrals/${referralId}/certificate`)
+      setCertificate(data)
+    } catch {
+      setCertificate(null)
+    }
+  }
+
+  useEffect(() => {
+    refreshCandidateData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, currentUser?.id])
+
+  const onReferralChange = async (event) => {
+    const nextId = event.target.value
+    setSelectedReferralId(nextId)
+    if (!nextId) return
+    await Promise.all([loadJoiningForm(nextId), loadNda(nextId), loadNonWorker(nextId), loadCertificate(nextId)])
+  }
+
+  const handleDraftSave = async () => {
+    if (!selectedReferralId) return
+    setActionLoading('draft')
+    setNotice({ type: '', text: '' })
+    try {
+      const payload = {
+        ...joiningForm,
+        government_ids: governmentIdNumber ? [{ id_type: governmentIdType, id_number: governmentIdNumber, doc_name: uploadedIdDoc || null }] : joiningForm.government_ids,
+      }
+      await apiRequest(`/referrals/${selectedReferralId}/joining-form/draft`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+      setNotice({ type: 'success', text: 'Draft saved successfully' })
+      setMessage('Draft saved')
+      await loadJoiningForm(selectedReferralId)
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message })
+      setError(err.message)
+    } finally {
+      setActionLoading('')
+    }
+  }
+
+  const handleSubmitForm = async () => {
+    if (!selectedReferralId) return
+    setActionLoading('submit')
+    setNotice({ type: '', text: '' })
+    try {
+      const payload = {
+        ...joiningForm,
+        government_ids: governmentIdNumber ? [{ id_type: governmentIdType, id_number: governmentIdNumber, doc_name: uploadedIdDoc || null }] : joiningForm.government_ids,
+      }
+      await apiRequest(`/referrals/${selectedReferralId}/joining-form/submit`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+      setNotice({ type: 'success', text: 'Joining form submitted for HR review' })
+      setMessage('Joining form submitted')
+      await refreshCandidateData()
+      setActiveTab('status')
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message })
+      setError(err.message)
+    } finally {
+      setActionLoading('')
+    }
+  }
+
+  const handleSignNda = async () => {
+    if (!selectedReferralId) return
+    setActionLoading('sign-nda')
+    setNotice({ type: '', text: '' })
+    try {
+      await apiRequest(`/referrals/${selectedReferralId}/nda/sign`, { method: 'POST', body: JSON.stringify({}) })
+      setNotice({ type: 'success', text: 'NDA signed successfully' })
+      setMessage('NDA signed')
+      await refreshCandidateData()
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message })
+      setError(err.message)
+    } finally {
+      setActionLoading('')
+    }
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-        <h2 className="text-xl font-semibold text-green-900">Candidate Dashboard</h2>
-        <p className="text-green-700 mt-1">Welcome, {currentUser?.full_name}! Complete your internship onboarding tasks below</p>
-      </div>
-
-      {/* Task Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {tasks.map((task) => (
+    <div className="flex min-h-screen overflow-hidden rounded-none border-none bg-white shadow-none">
+      <aside className="flex w-64 flex-col bg-[#07153a] text-white">
+        <div className="border-b border-white/10 p-6">
+          <p className="text-3xl font-bold tracking-tight text-indigo-300">Intern Flow</p>
+          <p className="mt-1 text-sm text-slate-300">CANDIDATE PORTAL</p>
+        </div>
+        <nav className="space-y-1 p-4">
+          {NAV.map((item) => (
+            <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full rounded-lg px-3 py-3 text-left text-lg font-semibold ${activeTab === item.id ? 'bg-indigo-700/30 text-indigo-300' : 'text-slate-200 hover:bg-white/10'}`}>
+              {item.label}
+            </button>
+          ))}
+        </nav>
+        <div className="mt-auto border-t border-white/10 p-4">
+          <div className="text-sm text-slate-300">
+            <p className="font-semibold text-white">{currentUser?.full_name || 'Candidate'}</p>
+            <p>Candidate</p>
+          </div>
           <button
-            key={task.id}
-            onClick={() => setActiveTask(task.id)}
-            className={`p-4 rounded-lg border-2 transition text-left ${
-              activeTask === task.id
-                ? 'border-green-500 bg-green-50'
-                : 'border-gray-200 bg-white hover:border-green-300'
-            }`}
+            onClick={onLogout}
+            className="mt-4 w-full rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
           >
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                  <span className="text-2xl">{task.icon}</span>
-                  {task.title}
-                </h3>
-                <p className="text-gray-600 text-sm mt-1">{task.description}</p>
-              </div>
-              <span
-                className={`px-2 py-1 rounded text-xs font-semibold ${
-                  task.status === 'completed'
-                    ? 'bg-green-100 text-green-800'
-                    : task.status === 'in-progress'
-                      ? 'bg-blue-100 text-blue-800'
-                      : 'bg-yellow-100 text-yellow-800'
-                }`}
-              >
-                {task.status.charAt(0).toUpperCase() + task.status.slice(1)}
-              </span>
-            </div>
+            Logout
           </button>
-        ))}
-      </div>
+        </div>
+      </aside>
 
-      {/* Task Details */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
-        {activeTask === 'joining-form' && (
-          <div>
-            <h3 className="text-lg font-semibold mb-4">Joining Form</h3>
-            <p className="text-gray-600 mb-4">Please complete your joining form with accurate information.</p>
-            <button
-              onClick={() => setMessage('Joining form feature coming soon')}
-              className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition"
-            >
-              Start Joining Form
-            </button>
+      <main className="flex-1 overflow-auto bg-slate-50">
+        <header className="border-b border-slate-200 bg-white px-8 py-6">
+          <h1 className="text-4xl font-bold text-slate-800">Hello, {currentUser?.full_name || 'Candidate'}</h1>
+          <p className="mt-1 text-xl text-slate-500">Software Engineering Intern — Technology</p>
+          <div className="mt-3 w-80">
+            <select value={selectedReferralId} onChange={onReferralChange} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+              <option value="">Select referral</option>
+              {myReferrals.map((item) => <option key={item.id} value={item.id}>{item.id} · {item.state}</option>)}
+            </select>
+          </div>
+        </header>
+
+        {notice.text && (
+          <div className={`mx-8 mt-5 rounded-lg border px-4 py-3 text-sm ${notice.type === 'error' ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+            {notice.text}
           </div>
         )}
 
-        {activeTask === 'nda' && (
-          <div>
-            <h3 className="text-lg font-semibold mb-4">Non-Disclosure Agreement</h3>
-            <p className="text-gray-600 mb-4">Review the NDA terms and sign electronically using DocuSign.</p>
-            <button
-              onClick={() => setMessage('NDA signing feature coming soon')}
-              className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition"
-            >
-              Review & Sign NDA
-            </button>
-          </div>
-        )}
+        {activeTab === 'status' && (
+          <div className="space-y-6 p-8">
+            <div className="rounded-2xl border border-indigo-200 bg-white p-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-3xl font-bold text-slate-800">Action Required</p>
+                  <p className="text-lg text-slate-500">Please complete your Joining Form to proceed with onboarding.</p>
+                </div>
+                <button onClick={() => setActiveTab('documents')} className="rounded-lg bg-indigo-600 px-6 py-3 text-lg font-semibold text-white hover:bg-indigo-500">Complete Form</button>
+              </div>
+            </div>
 
-        {activeTask === 'non-worker-id' && (
-          <div>
-            <h3 className="text-lg font-semibold mb-4">Non-Worker ID</h3>
-            <p className="text-gray-600 mb-4">Your non-worker ID will be issued once all form submissions are reviewed by HR.</p>
-            <div className="mt-4 bg-blue-50 border border-blue-200 rounded p-3">
-              <p className="text-blue-800 text-sm">Status: Waiting for form submissions to be reviewed</p>
+            <div className="rounded-2xl border bg-white p-6">
+              <h3 className="text-3xl font-bold text-slate-800">Internship Journey</h3>
+              <div className="mt-6 grid grid-cols-6 gap-2">
+                {STEP_FLOW.map((label, index) => {
+                  const step = index + 1
+                  const active = step <= stepIndex
+                  return (
+                    <div key={label} className="text-center">
+                      <div className={`mx-auto mb-2 h-9 w-9 rounded-full border-2 ${active ? 'border-indigo-500 bg-indigo-100 text-indigo-700' : 'border-slate-300 bg-white text-slate-400'} flex items-center justify-center text-xs font-semibold`}>
+                        {step}
+                      </div>
+                      <p className={`text-xs font-semibold ${active ? 'text-indigo-700' : 'text-slate-500'}`}>{label}</p>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
+              <div className="rounded-2xl border bg-white p-6">
+                <h4 className="mb-4 text-xl font-bold text-slate-700">Upcoming Milestones</h4>
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-slate-200 p-4"><p className="font-semibold text-slate-800">Internship Start Date</p><p className="text-sm text-slate-500">Report to Bangalore Office at 9:00 AM IST.</p></div>
+                  <div className="rounded-xl border border-slate-200 p-4"><p className="font-semibold text-slate-800">Mentor Introduction Call</p><p className="text-sm text-slate-500">Virtual meet and greet with your assigned mentor.</p></div>
+                </div>
+              </div>
+              <div className="rounded-2xl border bg-white p-6">
+                <h4 className="mb-3 text-xl font-bold text-slate-700">Your Mentor</h4>
+                <div className="rounded-full bg-indigo-100 p-4 text-center text-2xl font-bold text-indigo-700">PS</div>
+                <p className="mt-3 text-xl font-bold text-slate-800">Priya Sharma</p>
+                <p className="text-sm text-slate-500">Senior Staff Engineer</p>
+                <button className="mt-4 w-full rounded-lg border border-indigo-200 px-4 py-2 text-sm font-semibold text-indigo-700">Send Message</button>
+              </div>
             </div>
           </div>
         )}
 
-        {activeTask === 'certificate' && (
-          <div>
-            <h3 className="text-lg font-semibold mb-4">Completion Certificate</h3>
-            <p className="text-gray-600 mb-4">You can request a completion certificate after your internship ends.</p>
-            <button
-              onClick={() => setMessage('Certificate request feature coming soon')}
-              className="bg-gray-400 text-white px-4 py-2 rounded cursor-not-allowed"
-              disabled
-            >
-              Request Certificate (Disabled until completion)
-            </button>
+        {activeTab === 'documents' && (
+          <div className="space-y-6 p-8">
+            <div className="rounded-2xl border bg-white p-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-4xl font-bold text-slate-800">Joining Form</h3>
+                <button onClick={handleDraftSave} disabled={actionLoading === 'draft'} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">{actionLoading === 'draft' ? 'Saving...' : 'Save Draft'}</button>
+              </div>
+              <p className="mt-2 text-sm text-slate-500">Step 3 of 5 • Government IDs & Education</p>
+            </div>
+
+            <div className="rounded-2xl border bg-white p-6">
+              <h4 className="text-3xl font-bold text-slate-800">Government IDs & Education</h4>
+              <p className="mt-1 text-lg text-slate-500">Please provide details as per your official documents.</p>
+
+              <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-5">
+                <p className="font-semibold text-slate-700">Non-Worker ID</p>
+                <p className="text-2xl font-bold text-slate-800">{nonWorker?.generated_non_worker_id || 'NW-9843-INT'}</p>
+                <p className="text-sm text-slate-500">This ID is auto-assigned and will be used for your system access provisioning.</p>
+              </div>
+
+              <div className="mt-6 grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-slate-600">ID Type</label>
+                  <input value={governmentIdType} onChange={(e) => setGovernmentIdType(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-slate-600">ID Number</label>
+                  <input value={governmentIdNumber} onChange={(e) => setGovernmentIdNumber(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" placeholder="XXXX-XXXX-1234" />
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-xl border border-dashed border-indigo-200 bg-slate-50 p-8 text-center">
+                <p className="text-sm text-slate-600">Click to upload or drag and drop</p>
+                <input type="file" className="mx-auto mt-3 text-sm" onChange={(e) => setUploadedIdDoc(e.target.files?.[0]?.name || '')} />
+                {uploadedIdDoc && <p className="mt-3 text-xs font-semibold text-emerald-700">{uploadedIdDoc} uploaded</p>}
+              </div>
+
+              <div className="mt-5 flex items-center justify-end gap-3">
+                <button onClick={handleDraftSave} disabled={actionLoading === 'draft'} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">{actionLoading === 'draft' ? 'Saving...' : 'Save Draft'}</button>
+                <button onClick={handleSubmitForm} disabled={actionLoading === 'submit'} className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white">{actionLoading === 'submit' ? 'Submitting...' : 'Submit Form'}</button>
+              </div>
+            </div>
           </div>
         )}
-      </div>
+
+        {activeTab === 'nda' && (
+          <div className="space-y-4 p-8">
+            <div className="rounded-2xl border bg-white p-6">
+              <h3 className="text-3xl font-bold text-slate-800">NDA</h3>
+              <p className="mt-1 text-sm text-slate-500">Review and sign your NDA to continue onboarding.</p>
+              <div className="mt-4 text-sm text-slate-600">Status: <span className="font-semibold">{nda?.status || 'Pending'}</span></div>
+              <button onClick={handleSignNda} disabled={actionLoading === 'sign-nda'} className="mt-4 rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white">{actionLoading === 'sign-nda' ? 'Signing...' : 'Sign NDA'}</button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'contact' && (
+          <div className="space-y-4 p-8">
+            <div className="rounded-2xl border bg-white p-6">
+              <h3 className="text-3xl font-bold text-slate-800">Contact HR</h3>
+              <p className="mt-2 text-sm text-slate-600">Need help with your internship onboarding?</p>
+              <p className="mt-3 text-sm text-slate-700">Email: hr.support@hexaware.com</p>
+              <p className="text-sm text-slate-700">Phone: +91 80 4000 1234</p>
+              <p className="mt-3 text-sm text-slate-700">Certificate status: {certificate?.status || 'Not started'}</p>
+            </div>
+          </div>
+        )}
+
+        {loading && <div className="px-8 pb-8 text-sm text-slate-500">Loading candidate data...</div>}
+      </main>
     </div>
   )
 }

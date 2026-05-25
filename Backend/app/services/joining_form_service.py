@@ -1,6 +1,6 @@
 """Service for joining form business logic."""
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, cast
 from uuid import UUID
 from datetime import datetime
 
@@ -35,9 +35,12 @@ class JoiningFormService:
         referral = self.referral_repo.get_by_id(self.db, referral_id)
         if not referral:
             raise ValueError(f"Referral {referral_id} not found")
+
+        candidate_id = cast(UUID, referral.candidate_id)
+        referrer_id = cast(UUID, referral.referrer_id)
         
         # Check access: candidate or referrer
-        if referral.candidate_id != current_user_id and referral.referrer_id != current_user_id:
+        if candidate_id != current_user_id and referrer_id != current_user_id:
             raise PermissionError("User does not have access to this referral")
         
         # Get or create form
@@ -49,16 +52,19 @@ class JoiningFormService:
             if key in form_data:
                 draft_data[key] = form_data[key]
         
-        form = self.form_repo.save_draft(self.db, form.id, **draft_data)
+        form_id = cast(UUID, form.id)
+        form = self.form_repo.save_draft(self.db, form_id, **draft_data)
+        if not form:
+            raise ValueError("Failed to save joining form draft")
         
         # Log draft save event
         self.event_repo.create(
             self.db,
             referral_id=referral_id,
-            event_type="JOINING_FORM_DRAFT_SAVED",
+            event_type="JOINING_FORM_SAVED",
             triggered_by=current_user_id,
             description="Candidate saved joining form draft",
-            context={}
+            data={}
         )
         
         return form
@@ -69,9 +75,11 @@ class JoiningFormService:
         referral = self.referral_repo.get_by_id(self.db, referral_id)
         if not referral:
             raise ValueError(f"Referral {referral_id} not found")
+
+        candidate_id = cast(UUID, referral.candidate_id)
         
         # Only candidate can submit their joining form
-        if referral.candidate_id != current_user_id:
+        if candidate_id != current_user_id:
             raise PermissionError("Only the candidate can submit their joining form")
         
         # Get or create form
@@ -84,9 +92,10 @@ class JoiningFormService:
                 raise ValueError(f"Missing required field: {field}")
         
         # Update form with submitted data
+        form_id = cast(UUID, form.id)
         form = self.form_repo.update(
             self.db,
-            form.id,
+            form_id,
             personal_details=form_data.get("personal_details"),
             address=form_data.get("address"),
             emergency_contact=form_data.get("emergency_contact"),
@@ -96,23 +105,30 @@ class JoiningFormService:
             declarations_signed=form_data.get("declarations_signed", True),
             signature_date=datetime.utcnow()
         )
+        if not form:
+            raise ValueError("Failed to update joining form before submission")
         
         # Submit form
-        form = self.form_repo.submit(self.db, form.id, submitted_by=current_user_id)
+        submitted_form_id = cast(UUID, form.id)
+        form = self.form_repo.submit(self.db, submitted_form_id, submitted_by=current_user_id)
+        if not form:
+            raise ValueError("Failed to submit joining form")
         
-        # Update referral state to JOINING_FORM_IN_PROGRESS
-        self.referral_repo.update_state(self.db, referral_id, "JOINING_FORM_IN_PROGRESS")
+        # Update referral state to the canonical submitted state.
+        self.referral_repo.update_state(self.db, referral_id, "JOINING_FORM_SUBMITTED")
         
         # Log form submission event
+        personal_details = cast(dict, form.personal_details) if form.personal_details is not None else {}
+
         self.event_repo.create(
             self.db,
             referral_id=referral_id,
             event_type="JOINING_FORM_SUBMITTED",
             triggered_by=current_user_id,
             description="Candidate submitted joining form for HR review",
-            context={
+            data={
                 "form_id": str(form.id),
-                "email": form.personal_details.get("email") if form.personal_details else None
+                "email": personal_details.get("email")
             }
         )
         
@@ -125,10 +141,13 @@ class JoiningFormService:
             raise ValueError(f"Referral {referral_id} not found")
         
         # Check access: candidate, referrer, or mentor
+        candidate_id = cast(UUID, referral.candidate_id)
+        referrer_id = cast(UUID, referral.referrer_id)
+        mentor_id = cast(UUID, referral.mentor_id)
         is_authorized = (
-            referral.candidate_id == current_user_id or
-            referral.referrer_id == current_user_id or
-            referral.mentor_id == current_user_id
+            candidate_id == current_user_id or
+            referrer_id == current_user_id or
+            mentor_id == current_user_id
         )
         if not is_authorized:
             raise PermissionError("User does not have access to this referral")
@@ -151,14 +170,18 @@ class JoiningFormService:
         if not form:
             raise ValueError(f"Joining form not found for referral {referral_id}")
         
-        if form.status != "SUBMITTED":
-            raise ValueError(f"Cannot approve form with status {form.status}")
+        form_status = cast(str, form.status)
+        if form_status != "SUBMITTED":
+            raise ValueError(f"Cannot approve form with status {form_status}")
         
         # Approve
-        form = self.form_repo.approve(self.db, form.id, reviewed_by=current_user_id)
+        form_id = cast(UUID, form.id)
+        form = self.form_repo.approve(self.db, form_id, reviewed_by=current_user_id)
+        if not form:
+            raise ValueError("Failed to approve joining form")
         
-        # Update referral state to JOINING_FORM_APPROVED
-        self.referral_repo.update_state(self.db, referral_id, "JOINING_FORM_APPROVED")
+        # Once HR approves, the next stage is NDA issuance.
+        self.referral_repo.update_state(self.db, referral_id, "NDA_PENDING")
         
         # Log approval event
         self.event_repo.create(
@@ -167,7 +190,7 @@ class JoiningFormService:
             event_type="JOINING_FORM_APPROVED",
             triggered_by=current_user_id,
             description=f"HR approved joining form. Notes: {notes or 'None'}",
-            context={
+            data={
                 "form_id": str(form.id),
                 "notes": notes
             }
@@ -187,11 +210,15 @@ class JoiningFormService:
         if not form:
             raise ValueError(f"Joining form not found for referral {referral_id}")
         
-        if form.status != "SUBMITTED":
-            raise ValueError(f"Cannot reject form with status {form.status}")
+        form_status = cast(str, form.status)
+        if form_status != "SUBMITTED":
+            raise ValueError(f"Cannot reject form with status {form_status}")
         
         # Reject
-        form = self.form_repo.reject(self.db, form.id, reviewed_by=current_user_id)
+        form_id = cast(UUID, form.id)
+        form = self.form_repo.reject(self.db, form_id, reviewed_by=current_user_id)
+        if not form:
+            raise ValueError("Failed to reject joining form")
         
         # Keep referral state as JOINING_FORM_PENDING (candidate needs to resubmit)
         
@@ -202,7 +229,7 @@ class JoiningFormService:
             event_type="JOINING_FORM_REJECTED",
             triggered_by=current_user_id,
             description=f"HR rejected joining form. Reason: {notes or 'See notes in form'}",
-            context={
+            data={
                 "form_id": str(form.id),
                 "reason": notes
             }

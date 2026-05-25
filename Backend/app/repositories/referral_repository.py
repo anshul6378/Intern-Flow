@@ -94,6 +94,75 @@ class ReferralRepository:
         return results, total
 
     @staticmethod
+    def list_for_candidate(
+        db: Session,
+        candidate_id: UUID,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> tuple[List[Referral], int]:
+        """List referrals mapped to a candidate with pagination."""
+        query = db.query(Referral).filter(Referral.candidate_id == candidate_id)
+        total = query.count()
+        results = query.order_by(Referral.created_at.desc()).offset(skip).limit(limit).all()
+        return results, total
+
+    @staticmethod
+    def list_for_referrer(
+        db: Session,
+        referrer_id: UUID,
+        skip: int = 0,
+        limit: int = 50,
+        state: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> tuple[List[Referral], int]:
+        """List referrals mapped to a referrer with optional state/status filters."""
+        query = db.query(Referral).filter(Referral.referrer_id == referrer_id)
+        if state is not None:
+            query = query.filter(Referral.state == state)
+        if status is not None:
+            query = query.filter(Referral.status == status)
+        total = query.count()
+        results = query.order_by(Referral.created_at.desc()).offset(skip).limit(limit).all()
+        return results, total
+
+    @staticmethod
+    def list_for_mentor(
+        db: Session,
+        mentor_id: UUID,
+        skip: int = 0,
+        limit: int = 50,
+        state: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> tuple[List[Referral], int]:
+        """List referrals mapped to a mentor with optional state/status filters."""
+        query = db.query(Referral).filter(Referral.mentor_id == mentor_id)
+        if state is not None:
+            query = query.filter(Referral.state == state)
+        if status is not None:
+            query = query.filter(Referral.status == status)
+        total = query.count()
+        results = query.order_by(Referral.created_at.desc()).offset(skip).limit(limit).all()
+        return results, total
+
+    @staticmethod
+    def list_hr_queue(
+        db: Session,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> tuple[List[Referral], int]:
+        """List referrals that require HR actions in the workflow queue."""
+        hr_states = [
+            "JOINING_FORM_SUBMITTED",
+            "NDA_SIGNED",
+            "NON_WORKER_ID_PENDING",
+            "IN_CLOSURE",
+        ]
+        query = db.query(Referral).filter(Referral.state.in_(hr_states), Referral.status == "ACTIVE")
+        total = query.count()
+        results = query.order_by(Referral.updated_at.desc()).offset(skip).limit(limit).all()
+        return results, total
+
+    @staticmethod
     def update(db: Session, referral_id: UUID, **updates) -> Optional[Referral]:
         """Update a referral."""
         referral = ReferralRepository.get_by_id(db, referral_id)
