@@ -22,6 +22,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     
     # User metadata
+    employee_id = Column(String, unique=True, nullable=True)  # Company employee ID
     department = Column(String, nullable=True)  # Department of employee
     manager_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  # For manager hierarchy
     

@@ -1,6 +1,5 @@
 ﻿import { useEffect, useState } from 'react'
 
-import AuthSection from './components/pages/AuthSection'
 import ReferrerDashboard from './components/dashboards/ReferrerDashboard'
 import CandidateDashboard from './components/dashboards/CandidateDashboard'
 import MentorDashboard from './components/dashboards/MentorDashboard'
@@ -10,6 +9,7 @@ import ManagerDashboard from './components/dashboards/ManagerDashboard'
 const EMPTY_REGISTER = {
   full_name: '',
   email: '',
+  employee_id: '',
   password: '',
   role: 'referrer',
 }
@@ -110,9 +110,57 @@ const EMPTY_NDA_SEND = {
   expires_in_hours: 48,
 }
 
+const POPUP_TIMEOUT_MS = 2000
+
+function BrandPulseIcon({ className = 'h-5 w-5' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <path d="M2 12h4l2-5 3 10 2-6h3l1 2h5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function PortalRoleIcon({ role, className = 'h-4 w-4' }) {
+  if (role === 'candidate') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+        <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M3.5 18.5c0-2.6 2.2-4.5 5.5-4.5s5.5 1.9 5.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <circle cx="17.5" cy="9.5" r="2.5" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M14.5 18.5c.3-1.9 1.9-3.2 4-3.2 1.2 0 2.2.4 3 1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    )
+  }
+
+  if (role === 'mentor') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+        <path d="M12 3.5l2.5 5.1 5.6.8-4.1 4 1 5.6-5-2.7-5 2.7 1-5.6-4.1-4 5.6-.8L12 3.5z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      </svg>
+    )
+  }
+
+  if (role === 'admin') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+        <path d="M12 3l7 3v5.5c0 4.6-3.1 7.8-7 9.5-3.9-1.7-7-4.9-7-9.5V6l7-3z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+        <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <circle cx="10" cy="8" r="3" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M4 18.5c0-2.7 2.3-4.5 6-4.5s6 1.8 6 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M18 7v5M15.5 9.5h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function App() {
   const [showAuthPanel, setShowAuthPanel] = useState(false)
-  const [showAboutModal, setShowAboutModal] = useState(false)
+  const [authPortal, setAuthPortal] = useState('referrer')
   const [registerForm, setRegisterForm] = useState(EMPTY_REGISTER)
   const [loginForm, setLoginForm] = useState(EMPTY_LOGIN)
   const [claimForm, setClaimForm] = useState(EMPTY_CLAIM)
@@ -135,6 +183,19 @@ function App() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [lookupLoading, setLookupLoading] = useState(false)
+
+  useEffect(() => {
+    if (!message && !error) {
+      return
+    }
+
+    const timeoutId = setTimeout(() => {
+      setMessage('')
+      setError('')
+    }, POPUP_TIMEOUT_MS)
+
+    return () => clearTimeout(timeoutId)
+  }, [message, error])
 
   const resetStatus = () => {
     setMessage('')
@@ -285,7 +346,7 @@ function App() {
         method: 'POST',
         body: JSON.stringify(registerForm),
       })
-      setMessage(`Registered ${registerForm.email}. User ID: ${data.user_id}`)
+      setMessage(`You have been registered as ${registerForm.email}`)
       setRegisterForm(EMPTY_REGISTER)
     } catch (err) {
       setError(err.message)
@@ -682,8 +743,6 @@ function App() {
   const canRejectNda = canSignNda
   const canExpireNda = canIssueNda
 
-  const statusTone = selectedReferral?.state || 'Workflow ready'
-
   // Show full-screen dashboard if user is logged in with a valid role
   const isLoggedInWithRole = token && currentUser && ['referrer', 'candidate', 'mentor', 'hr', 'admin', 'manager'].includes(currentUser.role)
 
@@ -737,241 +796,361 @@ function App() {
     )
   }
 
+  const portalItems = [
+    { value: 'referrer', label: 'Referrer', description: 'Submit and track internship referrals through the pipeline.' },
+    { value: 'candidate', label: 'Candidate', description: 'Complete your joining form, sign your NDA, and track milestones.' },
+    { value: 'mentor', label: 'Mentor', description: 'Guide your interns, review project briefs, and confirm start dates.' },
+    { value: 'admin', label: 'Admin', description: 'Monitor SLA compliance, provision IDs, and generate reports.' },
+  ]
+
+  const authThemeByPortal = {
+    referrer: {
+      accent: '#5a47f5',
+      accentSoft: 'rgba(90,71,245,0.16)',
+      accentBorder: 'rgba(90,71,245,0.6)',
+      tagline: 'Submit and manage candidate referrals.',
+      icon: '+',
+      loginIcon: '->',
+      claimIcon: 'key',
+    },
+    candidate: {
+      accent: '#8b5cf6',
+      accentSoft: 'rgba(139,92,246,0.16)',
+      accentBorder: 'rgba(139,92,246,0.6)',
+      tagline: 'Your account was created by HR — claim it to get started.',
+      icon: '+',
+      loginIcon: '->',
+      claimIcon: 'key',
+    },
+    mentor: {
+      accent: '#0ea5e9',
+      accentSoft: 'rgba(14,165,233,0.16)',
+      accentBorder: 'rgba(14,165,233,0.6)',
+      tagline: 'Your account was assigned by HR — claim it to guide your interns.',
+      icon: '+',
+      loginIcon: '->',
+      claimIcon: 'key',
+    },
+    admin: {
+      accent: '#10b981',
+      accentSoft: 'rgba(16,185,129,0.16)',
+      accentBorder: 'rgba(16,185,129,0.6)',
+      tagline: 'Monitor compliance, SLAs, and platform operations.',
+      icon: '+',
+      loginIcon: '->',
+      claimIcon: 'key',
+    },
+  }
+
+  const authTheme = authThemeByPortal[authPortal]
+  const isClaimPortal = authPortal === 'candidate' || authPortal === 'mentor'
+
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(242,102,34,0.24),_transparent_35%),radial-gradient(circle_at_top_right,_rgba(255,214,102,0.22),_transparent_28%),linear-gradient(180deg,_#08111f_0%,_#0b1220_42%,_#f5f7fb_42%,_#f5f7fb_100%)] text-slate-900">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-4 py-6 md:px-6 lg:px-8">
-        {!token && !currentUser && !showAuthPanel && (
-          <header className="overflow-hidden rounded-[2rem] border border-white/10 bg-white/8 p-6 text-white shadow-[0_20px_70px_rgba(2,8,23,0.35)] backdrop-blur-xl">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-              <div className="max-w-3xl">
-                <div className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
-                  Intern Flow • Backend ready
-                </div>
-                <h1 className="mt-4 text-4xl font-black tracking-tight md:text-6xl">
-                  Referral automation, rebuilt for the internship lifecycle.
-                </h1>
-                <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 md:text-base">
-                  Register users, log in as the referrer, create referrals, run eligibility checks, and drive workflow state transitions from one compact workspace.
-                </p>
+    <div className={showAuthPanel ? 'min-h-screen bg-[#020b2a] text-white' : 'min-h-screen bg-[#e8edf4] text-slate-900'}>
+      {showAuthPanel ? (
+        <div className="min-h-screen">
+          <header className="border-b border-white/10 px-6 py-4">
+            <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
+              <div className="flex items-center gap-2">
+                <BrandPulseIcon className="h-5 w-5 text-indigo-300" />
+                <p className="text-3xl font-bold text-indigo-300">Intern Flow</p>
               </div>
-              <div className="grid gap-3 rounded-3xl border border-white/10 bg-slate-950/40 p-4 text-sm text-slate-200 md:grid-cols-3 lg:min-w-[360px]">
-                <div>
-                  <div className="text-slate-400">Session</div>
-                  <div className="mt-1 font-semibold">{currentUser ? currentUser.full_name : 'Not signed in'}</div>
+              <button
+                onClick={() => setShowAuthPanel(false)}
+                className="rounded-xl border border-slate-600 bg-transparent px-6 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-400 hover:text-white"
+              >
+                Back to Home
+              </button>
+            </div>
+          </header>
+
+          <main className="mx-auto w-full max-w-5xl px-4 py-10">
+            {(message || error) && (
+              <div className={`mb-6 rounded-xl border px-4 py-3 text-sm ${error ? 'border-rose-400/60 bg-rose-500/10 text-rose-100' : 'border-emerald-300/40 bg-emerald-500/10 text-emerald-100'}`}>
+                {error || message}
+              </div>
+            )}
+
+            <div className="text-center">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Select Your Portal</p>
+              <div className="mx-auto mt-3 flex w-full max-w-2xl flex-wrap items-center justify-center gap-2 rounded-2xl border border-[#243358] bg-[#111f3f] p-1.5">
+                {portalItems.map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => {
+                      setAuthPortal(item.value)
+                      setRegisterForm((current) => ({ ...current, role: item.value }))
+                      if (item.value === 'candidate' || item.value === 'mentor') {
+                        setClaimForm((current) => ({ ...current, role: item.value }))
+                      }
+                    }}
+                    className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${authPortal === item.value ? 'text-white shadow-[0_8px_24px_rgba(90,71,245,0.45)]' : 'text-slate-300 hover:bg-[#1a2b52] hover:text-white'}`}
+                    style={authPortal === item.value ? { backgroundColor: authTheme.accent } : undefined}
+                  >
+                    <PortalRoleIcon role={item.value} className="h-4 w-4" />
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              <div
+                className="mx-auto mt-5 inline-flex rounded-xl border px-6 py-2 text-sm font-medium"
+                style={{
+                  borderColor: authTheme.accentBorder,
+                  color: authTheme.accent,
+                  backgroundColor: authTheme.accentSoft,
+                }}
+              >
+                {authTheme.tagline}
+              </div>
+            </div>
+
+            {isClaimPortal ? (
+              <div className="mx-auto mt-7 w-full max-w-2xl">
+                <form onSubmit={handleClaimAccount} className="rounded-3xl border border-[#223664] bg-[#101d3f] p-6 shadow-[0_12px_28px_rgba(2,8,31,0.4)]">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">First Time?</p>
+                      <h2 className="mt-1 text-2xl font-bold text-white">Claim your account</h2>
+                    </div>
+                    <div className="rounded-xl px-3 py-1.5 text-sm font-semibold text-white" style={{ backgroundColor: authTheme.accent }}>
+                      {authTheme.claimIcon}
+                    </div>
+                  </div>
+
+                  <p className="mt-4 max-w-xl text-base text-slate-300">
+                    HR has already created your account. Enter your registered email to verify identity and set your password.
+                  </p>
+
+                  <div className="mt-6 space-y-4">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="claim_email">Registered email</label>
+                      <input id="claim_email" name="email" type="email" value={claimForm.email} onChange={handleClaimChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="you@company.com" required />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="claim_identifier">Employee / intern ID</label>
+                      <input id="claim_identifier" name="identifier" className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="e.g. HEX-2025-0042" />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="claim_password">Set new password</label>
+                      <input id="claim_password" name="password" type="password" value={claimForm.password} onChange={handleClaimChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="********" required />
+                    </div>
+                  </div>
+
+                  <button disabled={loading} className="mt-5 w-full rounded-xl py-2.5 text-sm font-semibold text-white transition disabled:opacity-60" style={{ backgroundColor: authTheme.accent }}>
+                    {loading ? 'Working...' : 'Claim account'}
+                  </button>
+
+                  <p className="mt-5 text-center text-sm text-slate-400">
+                    Don't have an account yet? <span style={{ color: authTheme.accent }} className="font-semibold">Contact HR</span>
+                  </p>
+                </form>
+              </div>
+            ) : (
+              <div className="mt-7 grid gap-4 lg:grid-cols-2">
+                <form onSubmit={handleRegister} className="rounded-3xl border border-[#223664] bg-[#101d3f] p-5 shadow-[0_12px_28px_rgba(2,8,31,0.4)]">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">New User</p>
+                      <h2 className="mt-1 text-2xl font-bold text-white">Register</h2>
+                    </div>
+                    <div className="rounded-xl px-3 py-1.5 text-base font-bold text-white" style={{ backgroundColor: authTheme.accent }}>{authTheme.icon}</div>
+                  </div>
+
+                  <div className="mt-6 space-y-4">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="register_full_name">Full name</label>
+                      <input id="register_full_name" name="full_name" value={registerForm.full_name} onChange={handleRegisterChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="e.g. Priya Sharma" required />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="register_email">Email</label>
+                      <input id="register_email" name="email" type="email" value={registerForm.email} onChange={handleRegisterChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="you@company.com" required />
+                    </div>
+                    {registerForm.role === 'referrer' && (
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="register_employee_id">Employee ID</label>
+                        <input id="register_employee_id" name="employee_id" value={registerForm.employee_id} onChange={handleRegisterChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="e.g. HEX-1024" required />
+                      </div>
+                    )}
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="register_password">Password</label>
+                      <input id="register_password" name="password" type="password" value={registerForm.password} onChange={handleRegisterChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="********" required />
+                    </div>
+                  </div>
+
+                  <button disabled={loading} className="mt-5 w-full rounded-xl py-2.5 text-sm font-semibold text-white transition disabled:opacity-60" style={{ backgroundColor: authTheme.accent }}>
+                    {loading ? 'Working...' : 'Create account'}
+                  </button>
+                </form>
+
+                <form onSubmit={handleLogin} className="rounded-3xl border border-[#223664] bg-[#101d3f] p-5 shadow-[0_12px_28px_rgba(2,8,31,0.4)]">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Existing</p>
+                      <h2 className="mt-1 text-2xl font-bold text-white">Sign In</h2>
+                    </div>
+                    <div className="rounded-xl px-3 py-1.5 text-base font-bold text-white" style={{ backgroundColor: authTheme.accent }}>{authTheme.loginIcon}</div>
+                  </div>
+
+                  <div className="mt-6 space-y-4">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="login_email">Email</label>
+                      <input id="login_email" name="email" type="email" value={loginForm.email} onChange={handleLoginChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="you@company.com" required />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="login_password">Password</label>
+                      <input id="login_password" name="password" type="password" value={loginForm.password} onChange={handleLoginChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="********" required />
+                    </div>
+                  </div>
+
+                  <div className="mt-5 text-right text-sm text-slate-400">Forgot password?</div>
+
+                  <button disabled={loading} className="mt-5 w-full rounded-xl py-2.5 text-sm font-semibold text-white transition disabled:opacity-60" style={{ backgroundColor: authTheme.accent }}>
+                    {loading ? 'Working...' : 'Sign in'}
+                  </button>
+                </form>
+              </div>
+            )}
+          </main>
+        </div>
+      ) : (
+        <div className="flex min-h-screen">
+          <aside className="w-full max-w-[255px] bg-[#0a1533] text-white">
+            <div className="border-b border-white/10 px-6 py-7">
+              <div className="flex items-center gap-2">
+                <BrandPulseIcon className="h-5 w-5 text-indigo-300" />
+                <p className="text-3xl font-bold text-indigo-300">Intern Flow</p>
+              </div>
+              <p className="mt-2 text-sm text-slate-400">Hexaware Technologies</p>
+            </div>
+            <div className="px-5 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Platform Stats</p>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="rounded-xl bg-[#142447] p-3">
+                  <p className="text-2xl font-bold">11</p>
+                  <p className="mt-1 text-xs text-slate-400">Active Interns</p>
                 </div>
-                <div>
-                  <div className="text-slate-400">Role</div>
-                  <div className="mt-1 font-semibold">{currentUser ? currentUser.role : 'Guest'}</div>
+                <div className="rounded-xl bg-[#142447] p-3">
+                  <p className="text-2xl font-bold">24</p>
+                  <p className="mt-1 text-xs text-slate-400">Open Referrals</p>
                 </div>
-                <div>
-                  <div className="text-slate-400">Referral state</div>
-                  <div className="mt-1 font-semibold">{statusTone}</div>
+                <div className="rounded-xl bg-[#142447] p-3">
+                  <p className="text-2xl font-bold">5</p>
+                  <p className="mt-1 text-xs text-slate-400">Pending Actions</p>
+                </div>
+                <div className="rounded-xl bg-[#142447] p-3">
+                  <p className="text-2xl font-bold">92%</p>
+                  <p className="mt-1 text-xs text-slate-400">SLA Compliance</p>
                 </div>
               </div>
             </div>
-          </header>
-        )}
+          </aside>
 
-        {(message || error) && (
-          <div
-            className={`rounded-2xl border px-4 py-3 text-sm shadow-sm ${
-              error
-                ? 'border-rose-200 bg-rose-50 text-rose-800'
-                : 'border-emerald-200 bg-emerald-50 text-emerald-800'
-            }`}
-          >
-            {error || message}
-          </div>
-        )}
+          <main className="flex-1 px-6 py-6">
+            {(message || error) && (
+              <div className={`mb-6 rounded-xl border px-4 py-3 text-sm ${error ? 'border-rose-300 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                {error || message}
+              </div>
+            )}
 
-        <main className="space-y-6">
-          {!token || !currentUser ? (
-            showAuthPanel ? (
-              <>
-                <div className="flex items-center justify-end">
-                  <button
-                    onClick={() => setShowAuthPanel(false)}
-                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                  >
-                    Back to Home
+            <div className="flex flex-wrap items-start gap-3">
+              <div>
+                <h1 className="text-[34px] font-black leading-none text-[#1d2940]">Welcome to Intern Flow</h1>
+                <p className="mt-1.5 text-sm text-slate-500">Select your role to continue</p>
+              </div>
+            </div>
+
+            <div className="mt-8 border-t border-slate-300 pt-8">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Choose Your Portal</p>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {portalItems.map((item) => (
+                  <button key={item.value} onClick={() => { setAuthPortal(item.value); setShowAuthPanel(true); setRegisterForm((current) => ({ ...current, role: item.value })); if (item.value === 'candidate' || item.value === 'mentor') { setClaimForm((current) => ({ ...current, role: item.value })) } }} className="rounded-3xl border border-slate-300 bg-[#f5f8fc] p-4 text-left shadow-sm transition hover:shadow-md">
+                    <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-300 bg-white text-indigo-500">
+                      <PortalRoleIcon role={item.value} className="h-4 w-4" />
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-900">{item.label}</h3>
+                    <p className="mt-2 text-sm text-slate-600">{item.description}</p>
                   </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-7 grid gap-4 lg:grid-cols-2">
+              <section className="rounded-3xl border border-slate-300 bg-[#f5f8fc] p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">How It Works</p>
+                <div className="relative mt-3 grid gap-2.5 sm:grid-cols-2">
+                  <div className="min-h-[148px] rounded-2xl border border-indigo-200 bg-indigo-50/80 p-3 text-center">
+                    <div className="mx-auto mb-1.5 inline-flex h-8 w-8 items-center justify-center rounded-xl border border-indigo-200 bg-white text-indigo-500">
+                      <PortalRoleIcon role="referrer" className="h-4 w-4" />
+                    </div>
+                    <p className="mx-auto inline-flex rounded-md bg-indigo-100 px-1.5 py-0.5 text-xs font-bold text-indigo-700">01</p>
+                    <p className="mt-1.5 text-base font-semibold text-slate-900">Referrer submits</p>
+                    <p className="mt-0.5 text-xs text-slate-600">Nominates a candidate</p>
+                  </div>
+
+                  <div className="min-h-[148px] rounded-2xl border border-violet-200 bg-violet-50/80 p-3 text-center">
+                    <div className="mx-auto mb-1.5 inline-flex h-8 w-8 items-center justify-center rounded-xl border border-violet-200 bg-white text-violet-500">
+                      <PortalRoleIcon role="candidate" className="h-4 w-4" />
+                    </div>
+                    <p className="mx-auto inline-flex rounded-md bg-violet-100 px-1.5 py-0.5 text-xs font-bold text-violet-700">02</p>
+                    <p className="mt-1.5 text-base font-semibold text-slate-900">Candidate onboards</p>
+                    <p className="mt-0.5 text-xs text-slate-600">Form, NDA and documents</p>
+                  </div>
+
+                  <div className="min-h-[148px] rounded-2xl border border-emerald-200 bg-emerald-50/80 p-3 text-center">
+                    <div className="mx-auto mb-1.5 inline-flex h-8 w-8 items-center justify-center rounded-xl border border-emerald-200 bg-white text-emerald-500">
+                      <PortalRoleIcon role="admin" className="h-4 w-4" />
+                    </div>
+                    <p className="mx-auto inline-flex rounded-md bg-emerald-100 px-1.5 py-0.5 text-xs font-bold text-emerald-700">04</p>
+                    <p className="mt-1.5 text-base font-semibold text-slate-900">Admin closes loop</p>
+                    <p className="mt-0.5 text-xs text-slate-600">Certifies and archives</p>
+                  </div>
+
+                  <div className="min-h-[148px] rounded-2xl border border-sky-200 bg-sky-50/80 p-3 text-center">
+                    <div className="mx-auto mb-1.5 inline-flex h-8 w-8 items-center justify-center rounded-xl border border-sky-200 bg-white text-sky-500">
+                      <PortalRoleIcon role="mentor" className="h-4 w-4" />
+                    </div>
+                    <p className="mx-auto inline-flex rounded-md bg-sky-100 px-1.5 py-0.5 text-xs font-bold text-sky-700">03</p>
+                    <p className="mt-1.5 text-base font-semibold text-slate-900">Mentor guides</p>
+                    <p className="mt-0.5 text-xs text-slate-600">Tracks intern progress</p>
+                  </div>
+
+                  <div className="pointer-events-none absolute left-1/2 top-[24%] hidden -translate-x-1/2 text-4xl font-black text-slate-500 sm:block">-&gt;</div>
+                  <div className="pointer-events-none absolute left-[75%] top-1/2 hidden -translate-x-1/2 -translate-y-1/2 text-4xl font-black text-slate-500 sm:block">v</div>
+                  <div className="pointer-events-none absolute left-1/2 top-[76%] hidden -translate-x-1/2 text-4xl font-black text-slate-500 sm:block">&lt;-</div>
                 </div>
-                <AuthSection
-                  registerForm={registerForm}
-                  loginForm={loginForm}
-                  claimForm={claimForm}
-                  currentUser={currentUser}
-                  loading={loading}
-                  roleOptions={ROLE_OPTIONS}
-                  handleRegister={handleRegister}
-                  handleRegisterChange={handleRegisterChange}
-                  handleLogin={handleLogin}
-                  handleLoginChange={handleLoginChange}
-                  handleClaimAccount={handleClaimAccount}
-                  handleClaimChange={handleClaimChange}
-                  handleLogout={handleLogout}
-                />
-              </>
-            ) : (
-              <>
-                <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
-                  <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
-                    <div>
-                      <div className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-orange-700">
-                        Intern Flow BRD • Version 1.0
-                      </div>
-                      <h2 className="mt-4 text-3xl font-black tracking-tight text-slate-900 md:text-4xl">
-                        AI-assisted internship automation for Hexaware's unpaid internship lifecycle.
-                      </h2>
-                      <p className="mt-4 text-slate-600 leading-7">
-                        Intern Flow is a centralized, workflow-driven platform to digitize and govern end-to-end
-                        internship operations. It replaces fragmented email and chat coordination with secure,
-                        auditable process automation across referral intake, onboarding, access provisioning,
-                        lifecycle tracking, and closure.
-                      </p>
-                      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Cycle Time</p>
-                          <p className="mt-1 text-xl font-black text-slate-800">80%+</p>
-                          <p className="text-xs text-slate-600">Referral to ready-to-start reduction target</p>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Data Accuracy</p>
-                          <p className="mt-1 text-xl font-black text-slate-800">95%+</p>
-                          <p className="text-xs text-slate-600">Validation-driven referral and onboarding records</p>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">NDA Compliance</p>
-                          <p className="mt-1 text-xl font-black text-slate-800">100%</p>
-                          <p className="text-xs text-slate-600">Pre-start NDA completion requirement</p>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Non-Worker ID SLA</p>
-                          <p className="mt-1 text-xl font-black text-slate-800">1 Day</p>
-                          <p className="text-xs text-slate-600">Provisioning turnaround objective</p>
-                        </div>
-                      </div>
-                      <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-sm font-semibold text-slate-800">Core AI Enablement</p>
-                        <p className="mt-1 text-sm text-slate-600">
-                          Resume parsing and prefill, eligibility validation, duplicate detection,
-                          smart form validations, contextual communication drafts, and SLA risk alerts.
-                        </p>
-                      </div>
-                      <div className="mt-8 flex flex-wrap gap-3">
-                        <button
-                          onClick={() => {
-                            setShowAboutModal(false)
-                            setShowAuthPanel(true)
-                          }}
-                          className="rounded-2xl bg-slate-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-                        >
-                          Register/Sign In
-                        </button>
-                        <button
-                          onClick={() => setShowAboutModal(true)}
-                          className="rounded-2xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                        >
-                          About Intern Flow
-                        </button>
-                      </div>
-                    </div>
+              </section>
 
-                    <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-900 to-slate-700 p-6 text-white shadow-lg">
-                      <h3 className="text-lg font-bold">Workflow Scope</h3>
-                      <ul className="mt-4 space-y-3 text-sm text-slate-200">
-                        <li>• Referral intake portal and AI-assisted data capture</li>
-                        <li>• Digital joining form with save-draft and validations</li>
-                        <li>• NDA issuance, e-sign, and archival controls</li>
-                        <li>• Non-Worker ID and AD credential provisioning flow</li>
-                        <li>• Start, delay, extension, closure, and certification tracking</li>
-                        <li>• SLA dashboards, audit trails, and compliance reporting</li>
-                      </ul>
-                      <div className="mt-5 rounded-xl border border-white/20 bg-white/10 p-3 text-xs text-slate-100">
-                        Final Outcome: faster cycle times, stronger legal/security compliance,
-                        leadership-level visibility, and improved intern/employee experience.
-                      </div>
-                    </div>
+              <section className="rounded-3xl bg-[#0d193b] p-4 text-white">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">About The Platform</p>
+                <p className="mt-3 text-lg leading-7 text-slate-200">
+                  Intern Flow is a centralized, workflow-driven platform to digitize and govern end-to-end
+                  internship operations, replacing fragmented email with secure and auditable automation.
+                </p>
+
+                <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl bg-[#1a2b52] p-3">
+                    <p className="text-2xl font-bold text-indigo-300">80%+</p>
+                    <p className="text-sm text-slate-300">Faster cycle</p>
                   </div>
-                </section>
-
-                {showAboutModal && (
-                  <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4"
-                    onClick={() => setShowAboutModal(false)}
-                  >
-                    <div
-                      className="max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl md:p-8"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-orange-600">About Intern Flow</p>
-                          <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-900">Internship Workflow Automation at Enterprise Scale</h3>
-                        </div>
-                        <button
-                          onClick={() => setShowAboutModal(false)}
-                          className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                        >
-                          Close
-                        </button>
-                      </div>
-
-                      <div className="mt-6 space-y-5 text-sm text-slate-700">
-                        <div>
-                          <p className="font-semibold text-slate-900">Executive Summary</p>
-                          <p className="mt-1 leading-6">
-                            Intern Flow transforms manual internship coordination into a unified, auditable workflow.
-                            The platform streamlines referral intake, joining formalities, NDA execution, and access
-                            provisioning while preserving governance and traceability.
-                          </p>
-                        </div>
-
-                        <div>
-                          <p className="font-semibold text-slate-900">Primary Objectives</p>
-                          <ul className="mt-2 space-y-1.5">
-                            <li>• Reduce referral-to-start processing time through automated workflows.</li>
-                            <li>• Improve data quality with structured forms and validation checkpoints.</li>
-                            <li>• Enforce policy, security, and legal compliance throughout the lifecycle.</li>
-                          </ul>
-                        </div>
-
-                        <div>
-                          <p className="font-semibold text-slate-900">Scope Coverage</p>
-                          <ul className="mt-2 space-y-1.5">
-                            <li>• Referral registration, role-based reviews, and eligibility controls.</li>
-                            <li>• Candidate joining form, NDA e-sign orchestration, and document readiness.</li>
-                            <li>• Non-Worker ID and AD provisioning milestones with SLA monitoring.</li>
-                            <li>• Start, delay, extension, closure, and completion certification visibility.</li>
-                          </ul>
-                        </div>
-
-                        <div>
-                          <p className="font-semibold text-slate-900">Key Stakeholders</p>
-                          <p className="mt-1 leading-6">
-                            Referrers, candidates, mentors, HR operations, and admin leadership collaborate through
-                            one source of truth with role-specific views and permissions.
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="font-semibold text-slate-900">Target Success Metrics</p>
-                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                            <p>• 80%+ faster referral-to-ready cycle</p>
-                            <p>• 95%+ onboarding data accuracy</p>
-                            <p>• 100% NDA-before-start compliance</p>
-                            <p>• 1-day non-worker provisioning SLA</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                  <div className="rounded-xl bg-[#1a2b52] p-3">
+                    <p className="text-2xl font-bold text-indigo-300">100%</p>
+                    <p className="text-sm text-slate-300">NDA compliance</p>
                   </div>
-                )}
-              </>
-            )
-          ) : null}
-        </main>
-      </div>
+                  <div className="rounded-xl bg-[#1a2b52] p-3">
+                    <p className="text-2xl font-bold text-indigo-300">95%+</p>
+                    <p className="text-sm text-slate-300">Data accuracy</p>
+                  </div>
+                  <div className="rounded-xl bg-[#1a2b52] p-3">
+                    <p className="text-2xl font-bold text-indigo-300">1 Day</p>
+                    <p className="text-sm text-slate-300">ID provisioning</p>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </main>
+        </div>
+      )}
     </div>
   )
 }

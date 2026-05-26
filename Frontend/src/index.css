@@ -12,6 +12,10 @@ body,
   min-height: 100%;
 }
 
+html {
+  font-size: 14px;
+}
+
 body {
   margin: 0;
   background: #f5f7fb;

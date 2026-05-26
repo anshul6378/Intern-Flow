@@ -29,6 +29,17 @@ class UserRepository:
         return result.scalar_one_or_none()
 
     @staticmethod
+    def get_user_by_employee_id(
+        db: Session,
+        employee_id: str
+    ):
+        result = db.execute(
+            select(User).where(User.employee_id == employee_id)
+        )
+
+        return result.scalar_one_or_none()
+
+    @staticmethod
     def create_user(
         db: Session,
         user: User

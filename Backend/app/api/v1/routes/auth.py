@@ -32,7 +32,8 @@ def register(
             email=payload.email,
             full_name=payload.full_name,
             password=payload.password,
-            role=payload.role
+            role=payload.role,
+            employee_id=payload.employee_id
         )
 
         return {
@@ -111,6 +112,7 @@ def me(current_user: User = Depends(get_current_user)):
         "id": str(current_user.id),
         "email": current_user.email,
         "full_name": current_user.full_name,
+        "employee_id": current_user.employee_id,
         "role": current_user.role,
         "department": current_user.department,
         "is_active": current_user.is_active,

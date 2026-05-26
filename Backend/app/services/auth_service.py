@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.models.user import User
 from app.repositories.user_repository import UserRepository
@@ -17,7 +18,8 @@ class AuthService:
         email: str,
         full_name: str,
         password: str,
-        role: str
+        role: str,
+        employee_id: str | None = None,
     ):
 
         existing_user = UserRepository.get_user_by_email(
@@ -28,17 +30,38 @@ class AuthService:
         if existing_user:
             raise Exception("User already exists")
 
+        if employee_id:
+            existing_employee = UserRepository.get_user_by_employee_id(
+                db,
+                employee_id
+            )
+
+            if existing_employee:
+                raise Exception("Employee ID already exists")
+
         user = User(
             email=email,
             full_name=full_name,
             hashed_password=hash_password(password),
-            role=role
+            role=role,
+            employee_id=employee_id,
         )
 
-        return UserRepository.create_user(
-            db,
-            user
-        )
+        try:
+            return UserRepository.create_user(
+                db,
+                user
+            )
+        except IntegrityError as e:
+            db.rollback()
+
+            error_text = str(e.orig)
+            if "uq_users_employee_id" in error_text or "employee_id" in error_text:
+                raise Exception("Employee ID already exists")
+            if "users_email_key" in error_text or "email" in error_text:
+                raise Exception("User already exists")
+
+            raise Exception("Unable to register user")
 
     @staticmethod
     def login_user(

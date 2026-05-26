@@ -62,7 +62,6 @@ function WorkflowSection(props) {
             </div>
             <Field label="Location" name="location" value={referralForm.location} onChange={handleReferralChange} />
             <Field label="Relationship to mentor" name="relationship_to_mentor" value={referralForm.relationship_to_mentor} onChange={handleReferralChange} placeholder="Team member, peer, friend..." />
-            <TextArea label="Project overview" name="project_overview" value={referralForm.project_overview} onChange={handleReferralChange} />
             <button className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60" disabled={loading || !token}>
               {loading ? 'Submitting...' : 'Create referral'}
             </button>
