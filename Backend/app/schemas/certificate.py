@@ -10,6 +10,10 @@ class CertificateRequestStart(BaseModel):
     request_form_url: str
 
 
+class CandidateCertificateRequest(BaseModel):
+    notes: str | None = None
+
+
 class CertificateMentorSubmit(BaseModel):
     internship_summary: str
     skills_acquired: list[str]
@@ -18,7 +22,14 @@ class CertificateMentorSubmit(BaseModel):
 
 class CertificateGenerateRequest(BaseModel):
     template_used: str = "default-v1"
-    archived_url: str
+    certificate_pdf_url: str
+    letterhead_pdf_url: str
+    archive_copy_url: str
+
+
+class CertificateIssueRequest(BaseModel):
+    candidate_download_url: str
+    candidate_email_sent_to: str
 
 
 class CertificateResponse(BaseModel):
@@ -35,6 +46,12 @@ class CertificateResponse(BaseModel):
     mentor_signature_date: datetime | None = None
     issued_date: datetime | None = None
     template_used: str | None = None
+    certificate_pdf_url: str | None = None
+    letterhead_pdf_url: str | None = None
+    archive_copy_url: str | None = None
+    candidate_download_url: str | None = None
+    candidate_email_sent_to: str | None = None
+    candidate_email_sent_at: datetime | None = None
     archived_url: str | None = None
     archived_at: datetime | None = None
     created_at: datetime

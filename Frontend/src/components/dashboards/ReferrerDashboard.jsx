@@ -92,16 +92,27 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
   const [notice, setNotice] = useState({ type: '', text: '' })
   const [form, setForm] = useState(EMPTY_FORM)
   const [uploadedResume, setUploadedResume] = useState('')
+  const [uploadedResumeMeta, setUploadedResumeMeta] = useState({
+    resume_url: '',
+    parsed_resume_data: null,
+    confidence_score: null,
+  })
+  const [resumeParsing, setResumeParsing] = useState(false)
   const [currentStep, setCurrentStep] = useState(1)
 
   const apiRequest = useCallback(async (path, options = {}) => {
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      ...(options.headers || {}),
+    }
+
+    if (!(options.body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json'
+    }
+
     const response = await fetch(`/api/v1${path}`, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        ...(options.headers || {}),
-      },
+      headers,
     })
     const text = await response.text()
     const data = text ? JSON.parse(text) : null
@@ -221,7 +232,7 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
     setActionLoading(true)
     setNotice({ type: '', text: '' })
     try {
-      const created = await apiRequest('/referrals', {
+      await apiRequest('/referrals', {
         method: 'POST',
         body: JSON.stringify({
           candidate_email: form.candidate_email,
@@ -295,7 +306,10 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
               department: currentUser?.department || '',
               email: currentUser?.email || '',
             },
-            ...(uploadedResume ? { uploaded_resume: uploadedResume } : {}),
+            ...(uploadedResume ? { uploaded_resume_file_name: uploadedResume } : {}),
+            ...(uploadedResumeMeta.resume_url ? { uploaded_resume_url: uploadedResumeMeta.resume_url } : {}),
+            ...(uploadedResumeMeta.parsed_resume_data ? { parsed_resume_data: uploadedResumeMeta.parsed_resume_data } : {}),
+            ...(uploadedResumeMeta.confidence_score !== null ? { resume_parse_confidence: uploadedResumeMeta.confidence_score } : {}),
           },
         }),
       })
@@ -303,6 +317,7 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
       setNotice({ type: 'success', text: `You have referred ${candidateName}` })
       setForm(EMPTY_FORM)
       setUploadedResume('')
+      setUploadedResumeMeta({ resume_url: '', parsed_resume_data: null, confidence_score: null })
       setCurrentStep(1)
       setActiveTab('dashboard')
       await loadReferrals()
@@ -310,6 +325,50 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
       setNotice({ type: 'error', text: err.message })
     } finally {
       setActionLoading(false)
+    }
+  }
+
+  const handleResumeUpload = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setUploadedResume(file.name)
+    setResumeParsing(true)
+    setNotice({ type: '', text: '' })
+
+    try {
+      const formData = new FormData()
+      formData.append('resume', file)
+
+      const parsed = await apiRequest('/referrals/parse-resume', {
+        method: 'POST',
+        body: formData,
+      })
+
+      setUploadedResumeMeta({
+        resume_url: parsed.resume_url || '',
+        parsed_resume_data: parsed.parsed_resume_data || null,
+        confidence_score: Number.isFinite(parsed.confidence_score) ? parsed.confidence_score : null,
+      })
+
+      setForm((current) => ({
+        ...current,
+        candidate_name: current.candidate_name || parsed.autofill_data?.candidate_name || '',
+        candidate_email: current.candidate_email || parsed.autofill_data?.candidate_email || '',
+        candidate_phone: current.candidate_phone || parsed.autofill_data?.candidate_phone || '',
+        linkedin_url: current.linkedin_url || parsed.autofill_data?.linkedin_url || '',
+        degree: current.degree || parsed.autofill_data?.degree || '',
+      }))
+
+      const confidence = Number.isFinite(parsed.confidence_score)
+        ? `${Math.round(parsed.confidence_score * 100)}%`
+        : 'N/A'
+      setNotice({ type: 'success', text: `Resume parsed successfully. Autofill confidence: ${confidence}.` })
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message || 'Resume parsing failed.' })
+    } finally {
+      setResumeParsing(false)
+      event.target.value = ''
     }
   }
 
@@ -503,7 +562,8 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
                     <input
                       id="resume-upload"
                       type="file"
-                      onChange={(e) => setUploadedResume(e.target.files?.[0]?.name || '')}
+                      accept=".pdf,.docx,.txt"
+                      onChange={handleResumeUpload}
                       className="hidden"
                     />
                     <label htmlFor="resume-upload" className="inline-flex cursor-pointer items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
@@ -511,6 +571,10 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
                     </label>
                   </div>
                   {uploadedResume && <p className="mt-3 inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">{uploadedResume} uploaded</p>}
+                  {resumeParsing && <p className="mt-2 text-xs font-semibold text-indigo-600">Parsing resume...</p>}
+                  {!resumeParsing && uploadedResumeMeta.confidence_score !== null && (
+                    <p className="mt-2 text-xs font-semibold text-slate-600">Autofill confidence: {Math.round(uploadedResumeMeta.confidence_score * 100)}%</p>
+                  )}
                 </div>
                 <div className="mt-5 flex items-center justify-end gap-3">
                   <button onClick={() => setNotice({ type: 'success', text: 'Draft saved locally.' })} className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">Save Draft</button>

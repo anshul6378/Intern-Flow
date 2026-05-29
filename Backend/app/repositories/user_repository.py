@@ -51,3 +51,25 @@ class UserRepository:
         db.refresh(user)
 
         return user
+
+    @staticmethod
+    def get_user_by_role(
+        db: Session,
+        role: str
+    ):
+        result = db.execute(
+            select(User).where(User.role == role).limit(1)
+        )
+
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    def get_users_by_role(
+        db: Session,
+        role: str
+    ):
+        result = db.execute(
+            select(User).where(User.role == role)
+        )
+
+        return list(result.scalars().all())

@@ -13,6 +13,14 @@ function MentorDashboard({ token, currentUser, setError, setMessage, onLogout })
   const [selectedReferralId, setSelectedReferralId] = useState('')
   const [timeline, setTimeline] = useState([])
   const [certificateStatus, setCertificateStatus] = useState(null)
+  const [reviewNotes, setReviewNotes] = useState('')
+  const [mentorRemark, setMentorRemark] = useState('')
+  const [progressStatus, setProgressStatus] = useState('ON_TRACK')
+  const [extensionEndDate, setExtensionEndDate] = useState('')
+  const [extensionReason, setExtensionReason] = useState('')
+  const [participationReview, setParticipationReview] = useState('')
+  const [projectCompletionReview, setProjectCompletionReview] = useState('')
+  const [completionNotes, setCompletionNotes] = useState('')
   const [notice, setNotice] = useState({ type: '', text: '' })
   const [loading, setLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState('')
@@ -76,6 +84,16 @@ function MentorDashboard({ token, currentUser, setError, setMessage, onLogout })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, currentUser?.id])
 
+  useEffect(() => {
+    if (!selectedReferralId) {
+      setTimeline([])
+      setCertificateStatus(null)
+      return
+    }
+    Promise.all([loadTimeline(selectedReferralId), loadCertificate(selectedReferralId)])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReferralId])
+
   const selectedReferral = useMemo(() => referrals.find((item) => item.id === selectedReferralId) || null, [referrals, selectedReferralId])
 
   const pendingItems = useMemo(() => referrals.filter((item) => ['JOINING_FORM_SUBMITTED', 'READY_TO_START', 'IN_PROGRESS'].includes(item.state)), [referrals])
@@ -101,13 +119,19 @@ function MentorDashboard({ token, currentUser, setError, setMessage, onLogout })
 
   const handleRequestExtension = async () => {
     if (!selectedReferralId) return
+    if (!extensionEndDate || !extensionReason.trim()) {
+      setNotice({ type: 'error', text: 'Provide new end date and reason for extension request.' })
+      return
+    }
     setActionLoading('extension')
     try {
-      await apiRequest(`/referrals/${selectedReferralId}/state`, {
-        method: 'PUT',
-        body: JSON.stringify({ next_state: 'EXTENDED', notes: 'Mentor requested project extension' }),
+      await apiRequest(`/referrals/${selectedReferralId}/extension-request`, {
+        method: 'POST',
+        body: JSON.stringify({ new_end_date: extensionEndDate, reason: extensionReason }),
       })
-      setNotice({ type: 'success', text: 'Extension requested' })
+      setNotice({ type: 'success', text: 'Extension request submitted for HR review.' })
+      setExtensionEndDate('')
+      setExtensionReason('')
       await loadMentorReferrals()
     } catch (err) {
       setNotice({ type: 'error', text: err.message })
@@ -134,6 +158,92 @@ function MentorDashboard({ token, currentUser, setError, setMessage, onLogout })
       setActionLoading('')
     }
   }
+
+  const handleMarkInternshipComplete = async () => {
+    if (!selectedReferralId) return
+    if (!participationReview.trim() || !projectCompletionReview.trim()) {
+      setNotice({ type: 'error', text: 'Please provide internship participation and project completion review.' })
+      return
+    }
+
+    setActionLoading('mark-complete')
+    try {
+      await apiRequest(`/referrals/${selectedReferralId}/mentor-complete`, {
+        method: 'POST',
+        body: JSON.stringify({
+          internship_participation: participationReview,
+          project_completion: projectCompletionReview,
+          notes: completionNotes || null,
+        }),
+      })
+      setNotice({ type: 'success', text: 'Internship marked complete. Status moved to COMPLETED.' })
+      setParticipationReview('')
+      setProjectCompletionReview('')
+      setCompletionNotes('')
+      await loadMentorReferrals()
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message || 'Failed to mark internship complete' })
+      setError(err.message)
+    } finally {
+      setActionLoading('')
+    }
+  }
+
+  const handleMentorReview = async (decision) => {
+    if (!selectedReferralId) return
+    setActionLoading(`mentor-${decision.toLowerCase()}`)
+    try {
+      await apiRequest(`/referrals/${selectedReferralId}/mentor-review`, {
+        method: 'POST',
+        body: JSON.stringify({
+          decision,
+          notes: reviewNotes || null,
+        }),
+      })
+      const actionText = decision === 'APPROVE' ? 'approved' : 'rejected'
+      setMessage(`Candidate ${actionText} by mentor review`)
+      setNotice({ type: 'success', text: `Candidate ${actionText}. HR notified${decision === 'APPROVE' ? ' and candidate invited to onboarding.' : '.'}` })
+      setReviewNotes('')
+      await loadMentorReferrals()
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message })
+      setError(err.message)
+    } finally {
+      setActionLoading('')
+    }
+  }
+
+  const handleAddRemark = async () => {
+    if (!selectedReferralId || !mentorRemark.trim()) {
+      setNotice({ type: 'error', text: 'Select an intern and enter remarks before submitting.' })
+      return
+    }
+
+    setActionLoading('add-remark')
+    try {
+      await apiRequest(`/referrals/${selectedReferralId}/mentor-remarks`, {
+        method: 'POST',
+        body: JSON.stringify({ remarks: mentorRemark, progress_status: progressStatus }),
+      })
+      setMessage('Mentor remark added successfully')
+      setNotice({ type: 'success', text: 'Remark added and progress timeline updated.' })
+      setMentorRemark('')
+      await loadMentorReferrals()
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message || 'Failed to add mentor remark' })
+      setError(err.message)
+    } finally {
+      setActionLoading('')
+    }
+  }
+
+  const additionalData = selectedReferral?.additional_data || {}
+  const candidateDetails = additionalData?.candidate_details || {}
+  const internshipDetails = additionalData?.internship_details || {}
+  const projectInfo = additionalData?.project_information || {}
+  const isMentorReviewEligible = selectedReferral && ['ADMIN_APPROVED', 'ACTIVE'].includes(selectedReferral.status)
+  const activeInterns = useMemo(() => referrals.filter((item) => ['IN_PROGRESS', 'EXTENDED'].includes(item.state)), [referrals])
+  const selectedInternRemarks = selectedReferral?.additional_data?.mentor_remarks || []
 
   return (
     <div className="flex min-h-screen overflow-hidden rounded-none border-none bg-white shadow-none">
@@ -196,6 +306,20 @@ function MentorDashboard({ token, currentUser, setError, setMessage, onLogout })
 
             <div className="rounded-2xl border bg-white p-6">
               <h3 className="mb-4 text-3xl font-bold text-slate-800">Active Interns</h3>
+              <div className="mb-4">
+                <label className="text-sm font-semibold text-slate-700">Assigned Intern</label>
+                <select
+                  value={selectedReferralId}
+                  onChange={(event) => setSelectedReferralId(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="">Select assigned intern</option>
+                  {referrals.map((item) => (
+                    <option key={item.id} value={item.id}>{item.id} · {item.state}</option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs text-slate-600">Assigned interns: {referrals.length} · Active now: {activeInterns.length}</p>
+              </div>
               <div className="space-y-4">
                 {referrals.map((r, idx) => (
                   <div key={r.id} className="rounded-xl border border-slate-200 p-4">
@@ -256,6 +380,48 @@ function MentorDashboard({ token, currentUser, setError, setMessage, onLogout })
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="font-semibold text-slate-700">Implementation</p><p className="text-sm text-slate-500">In Progress</p></div>
                 </div>
               </div>
+
+              <div className="rounded-2xl border bg-white p-6">
+                <h4 className="text-2xl font-bold text-slate-800">Progress Remarks</h4>
+                <p className="mt-1 text-sm text-slate-600">Add internship remarks and monitor progress updates.</p>
+                <div className="mt-3 grid gap-3 md:grid-cols-[1fr_200px]">
+                  <textarea
+                    value={mentorRemark}
+                    onChange={(event) => setMentorRemark(event.target.value)}
+                    rows={3}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Add mentor remark"
+                  />
+                  <select
+                    value={progressStatus}
+                    onChange={(event) => setProgressStatus(event.target.value)}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    <option value="ON_TRACK">On Track</option>
+                    <option value="AT_RISK">At Risk</option>
+                    <option value="BLOCKED">Blocked</option>
+                  </select>
+                </div>
+                <button
+                  onClick={handleAddRemark}
+                  disabled={actionLoading === 'add-remark' || !selectedReferralId}
+                  className="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300"
+                >
+                  {actionLoading === 'add-remark' ? 'Saving...' : 'Add Remark'}
+                </button>
+                <div className="mt-4 space-y-2">
+                  {!selectedInternRemarks.length ? (
+                    <p className="text-sm text-slate-500">No remarks yet for selected intern.</p>
+                  ) : (
+                    selectedInternRemarks.slice().reverse().slice(0, 4).map((item, index) => (
+                      <div key={`${item.recorded_at || ''}-${index}`} className="rounded border border-slate-200 p-2 text-sm">
+                        <p className="font-semibold text-slate-700">{item.progress_status || 'Update'}</p>
+                        <p className="text-slate-600">{item.remarks}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="space-y-6">
@@ -263,6 +429,23 @@ function MentorDashboard({ token, currentUser, setError, setMessage, onLogout })
                 <p className="text-2xl font-bold text-slate-800">Intern Summary</p>
                 <p className="mt-2 text-sm text-slate-500">{selectedReferral?.id || 'Select an intern from My Interns'}</p>
                 <p className="mt-1 text-sm text-slate-500">Certificate: {certificateStatus?.status || 'Not requested'}</p>
+                <p className="mt-1 text-sm text-slate-500">Current Status: {selectedReferral?.status || 'N/A'}</p>
+                <div className="mt-4 space-y-2">
+                  <input
+                    type="date"
+                    value={extensionEndDate}
+                    onChange={(event) => setExtensionEndDate(event.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="New end date"
+                  />
+                  <textarea
+                    value={extensionReason}
+                    onChange={(event) => setExtensionReason(event.target.value)}
+                    rows={2}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Reason for extension"
+                  />
+                </div>
                 <div className="mt-4 space-y-2">
                   <button onClick={handleRequestExtension} disabled={actionLoading === 'extension' || !selectedReferralId} className="w-full rounded-lg border border-slate-300 py-2 text-sm font-semibold text-slate-700">{actionLoading === 'extension' ? 'Requesting...' : 'Request Extension'}</button>
                   <button onClick={handleInitiateClosure} disabled={actionLoading === 'closure' || !selectedReferralId} className="w-full rounded-lg bg-[#0b1638] py-2 text-sm font-semibold text-white">{actionLoading === 'closure' ? 'Initiating...' : 'Initiate Closure'}</button>
@@ -270,9 +453,87 @@ function MentorDashboard({ token, currentUser, setError, setMessage, onLogout })
               </div>
 
               <div className="rounded-2xl border bg-white p-6">
+                <p className="text-2xl font-bold text-slate-800">Phase 3: Mentor Evaluation</p>
+                {!selectedReferral ? (
+                  <p className="mt-2 text-sm text-slate-600">Select a referral to review candidate suitability.</p>
+                ) : (
+                  <div className="mt-3 space-y-3 text-sm text-slate-700">
+                    <p><span className="font-semibold text-slate-900">Candidate:</span> {candidateDetails?.name || candidateDetails?.email || selectedReferral.candidate_id}</p>
+                    <p><span className="font-semibold text-slate-900">Resume:</span> {additionalData?.uploaded_resume_url ? <a href={additionalData.uploaded_resume_url} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Open Resume</a> : 'Not uploaded'}</p>
+                    <p><span className="font-semibold text-slate-900">Skills:</span> {projectInfo?.technologies_skills_required || 'Not provided'}</p>
+                    <p><span className="font-semibold text-slate-900">Project Alignment:</span> {projectInfo?.project_title || selectedReferral.project_overview || 'Not provided'}</p>
+                    <p><span className="font-semibold text-slate-900">Internship Duration:</span> {internshipDetails?.duration || `${selectedReferral.start_date || 'TBD'} - ${selectedReferral.end_date || 'TBD'}`}</p>
+
+                    <textarea
+                      value={reviewNotes}
+                      onChange={(event) => setReviewNotes(event.target.value)}
+                      rows={3}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      placeholder="Add mentor evaluation notes"
+                    />
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => handleMentorReview('APPROVE')}
+                        disabled={!isMentorReviewEligible || actionLoading === 'mentor-approve'}
+                        className="rounded-lg bg-emerald-600 py-2 text-sm font-semibold text-white disabled:bg-slate-300"
+                      >
+                        {actionLoading === 'mentor-approve' ? 'Approving...' : 'Approve Candidate'}
+                      </button>
+                      <button
+                        onClick={() => handleMentorReview('REJECT')}
+                        disabled={!isMentorReviewEligible || actionLoading === 'mentor-reject'}
+                        className="rounded-lg bg-rose-600 py-2 text-sm font-semibold text-white disabled:bg-slate-300"
+                      >
+                        {actionLoading === 'mentor-reject' ? 'Rejecting...' : 'Reject Candidate'}
+                      </button>
+                    </div>
+                    {!isMentorReviewEligible && (
+                      <p className="text-xs text-slate-500">Mentor review is enabled when referral status is ADMIN_APPROVED.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-2xl border bg-white p-6">
                 <p className="text-2xl font-bold text-slate-800">Required Action</p>
                 <p className="mt-2 text-sm text-slate-600">Confirm intern start to trigger IT access provisioning.</p>
                 <button onClick={handleConfirmInternStarted} disabled={actionLoading === 'confirm-start' || !selectedReferralId} className="mt-3 w-full rounded-lg bg-indigo-600 py-2 text-sm font-semibold text-white">Confirm Intern Started</button>
+              </div>
+
+              <div className="rounded-2xl border bg-white p-6">
+                <p className="text-2xl font-bold text-slate-800">Step 11: Mark Internship Complete</p>
+                <p className="mt-2 text-sm text-slate-600">Review participation and project completion before marking complete.</p>
+                <div className="mt-3 space-y-2">
+                  <textarea
+                    value={participationReview}
+                    onChange={(event) => setParticipationReview(event.target.value)}
+                    rows={2}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Internship participation review"
+                  />
+                  <textarea
+                    value={projectCompletionReview}
+                    onChange={(event) => setProjectCompletionReview(event.target.value)}
+                    rows={2}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Project completion review"
+                  />
+                  <textarea
+                    value={completionNotes}
+                    onChange={(event) => setCompletionNotes(event.target.value)}
+                    rows={2}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Additional notes (optional)"
+                  />
+                </div>
+                <button
+                  onClick={handleMarkInternshipComplete}
+                  disabled={actionLoading === 'mark-complete' || !selectedReferralId}
+                  className="mt-3 w-full rounded-lg bg-emerald-600 py-2 text-sm font-semibold text-white disabled:bg-slate-300"
+                >
+                  {actionLoading === 'mark-complete' ? 'Submitting...' : 'Mark Internship Complete'}
+                </button>
               </div>
 
               <div className="rounded-2xl border bg-white p-6">

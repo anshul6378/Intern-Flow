@@ -79,6 +79,46 @@ class ReferralUnholdRequest(BaseModel):
     reason: str | None = None
 
 
+class ReferralActivateRequest(BaseModel):
+    notes: str | None = None
+
+
+class AdminReferralReviewRequest(BaseModel):
+    decision: str = Field(pattern="^(APPROVE|REJECT|REQUEST_CHANGES)$")
+    notes: str | None = None
+
+
+class MentorReferralReviewRequest(BaseModel):
+    decision: str = Field(pattern="^(APPROVE|REJECT)$")
+    notes: str | None = None
+
+
+class MentorRemarkRequest(BaseModel):
+    remarks: str = Field(min_length=1)
+    progress_status: str | None = None
+
+
+class MentorExtensionRequest(BaseModel):
+    new_end_date: date
+    reason: str = Field(min_length=1)
+
+
+class HRExtensionReviewRequest(BaseModel):
+    decision: str = Field(pattern="^(APPROVE|REJECT)$")
+    notes: str | None = None
+
+
+class MentorCompleteInternshipRequest(BaseModel):
+    internship_participation: str = Field(min_length=1)
+    project_completion: str = Field(min_length=1)
+    notes: str | None = None
+
+
+class HRClosureReviewRequest(BaseModel):
+    decision: str = Field(pattern="^(APPROVE|REJECT)$")
+    notes: str | None = None
+
+
 class WorkflowEventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -124,3 +164,11 @@ class ReferralTimelineResponse(BaseModel):
     referral_id: UUID
     events: list[WorkflowEventResponse]
     total: int
+
+
+class ResumeParseResponse(BaseModel):
+    resume_url: str
+    file_name: str
+    parsed_resume_data: dict[str, Any]
+    autofill_data: dict[str, str]
+    confidence_score: float

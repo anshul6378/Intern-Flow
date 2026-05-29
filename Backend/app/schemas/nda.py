@@ -14,10 +14,20 @@ class NDASendRequest(BaseModel):
 
 class NDASignRequest(BaseModel):
     archived_url: str | None = None
+    signed_file_name: str | None = None
+
+
+class NDAApproveRequest(BaseModel):
+    notes: str | None = None
 
 
 class NDARejectRequest(BaseModel):
     reason: str | None = None
+
+
+class NDAUploadResponse(BaseModel):
+    file_name: str
+    archived_url: str
 
 
 class NDAResponse(BaseModel):
@@ -45,6 +55,7 @@ class NDAListItemResponse(BaseModel):
     id: UUID
     referral_id: UUID
     status: str
+    archived_url: str | None = None
     esign_provider: str | None = None
     expires_at: datetime | None = None
     created_at: datetime

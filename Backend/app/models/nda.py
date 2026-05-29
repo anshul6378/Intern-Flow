@@ -15,7 +15,7 @@ class NDADocument(Base):
     referral_id = Column(UUID(as_uuid=True), ForeignKey("referrals.id"), nullable=False, unique=True)
     
     # Status tracking (FR-8)
-    status = Column(String, nullable=False, default="PENDING")  # PENDING, SENT, SIGNED, EXPIRED, REJECTED
+    status = Column(String, nullable=False, default="PENDING")  # PENDING, SENT, UPLOADED, COMPLETED, EXPIRED, REJECTED
     
     # E-signature provider integration (FR-8)
     esign_token = Column(String, nullable=True)  # Token from DocuSign/Adobe Sign
@@ -47,7 +47,8 @@ class NDADocument(Base):
 NDA_STATUS = {
     "PENDING": "NDA not yet issued",
     "SENT": "E-sign email sent to candidate",
-    "SIGNED": "Candidate signed successfully",
+    "UPLOADED": "Candidate uploaded signed copy",
+    "COMPLETED": "HR approved completed NDA",
     "EXPIRED": "E-sign link expired",
     "REJECTED": "Candidate rejected signature",
 }

@@ -12,6 +12,10 @@ function ManagerDashboard({ token, currentUser, setError, setMessage, onLogout }
   const [notice, setNotice] = useState({ type: '', text: '' })
   const [referrals, setReferrals] = useState([])
   const [hrQueue, setHrQueue] = useState([])
+  const [reviewQueue, setReviewQueue] = useState([])
+  const [selectedReviewId, setSelectedReviewId] = useState('')
+  const [reviewNotes, setReviewNotes] = useState('')
+  const [reviewActionLoading, setReviewActionLoading] = useState('')
 
   const apiRequest = async (path, options = {}) => {
     const response = await fetch(`/api/v1${path}`, {
@@ -31,12 +35,18 @@ function ManagerDashboard({ token, currentUser, setError, setMessage, onLogout }
   const refreshAdminData = async () => {
     setLoading(true)
     try {
-      const [all, queue] = await Promise.all([
+      const [all, queue, adminReviewQueue] = await Promise.all([
         apiRequest('/referrals?limit=100'),
         apiRequest('/referrals/hr/queue?limit=100'),
+        currentUser?.role === 'admin' ? apiRequest('/referrals/admin/review-queue?limit=100') : Promise.resolve({ items: [] }),
       ])
       setReferrals(all.items || [])
       setHrQueue(queue.items || [])
+      const reviewItems = adminReviewQueue.items || []
+      setReviewQueue(reviewItems)
+      if (!selectedReviewId && reviewItems.length) {
+        setSelectedReviewId(reviewItems[0].id)
+      }
     } catch (err) {
       setNotice({ type: 'error', text: err.message || 'Failed to load admin data' })
       setError(err.message)
@@ -109,6 +119,61 @@ function ManagerDashboard({ token, currentUser, setError, setMessage, onLogout }
     }
   }
 
+  const handleAdminReview = async (decision) => {
+    if (currentUser?.role !== 'admin') {
+      setNotice({ type: 'error', text: 'Only admin can review referrals.' })
+      return
+    }
+    if (!selectedReviewId) {
+      setNotice({ type: 'error', text: 'Select a referral to review.' })
+      return
+    }
+
+    setReviewActionLoading(decision)
+    setLoading(true)
+    try {
+      await apiRequest(`/referrals/${selectedReviewId}/admin-review`, {
+        method: 'POST',
+        body: JSON.stringify({
+          decision,
+          notes: reviewNotes || null,
+        }),
+      })
+
+      const actionLabel = decision === 'APPROVE'
+        ? 'approved'
+        : decision === 'REJECT'
+          ? 'rejected'
+          : 'sent back for changes'
+      setMessage(`Referral ${selectedReviewId} ${actionLabel}`)
+      setNotice({ type: 'success', text: `Referral ${selectedReviewId} ${actionLabel}` })
+      setReviewNotes('')
+      await refreshAdminData()
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message || 'Admin review failed' })
+      setError(err.message)
+    } finally {
+      setLoading(false)
+      setReviewActionLoading('')
+    }
+  }
+
+  const selectedReviewReferral = useMemo(
+    () => reviewQueue.find((item) => item.id === selectedReviewId) || null,
+    [reviewQueue, selectedReviewId],
+  )
+
+  const reviewData = selectedReviewReferral?.additional_data || {}
+  const candidateDetails = reviewData?.candidate_details || {}
+  const internshipDetails = reviewData?.internship_details || {}
+  const mentorDetails = reviewData?.mentor_details || {}
+  const projectInfo = reviewData?.project_information || {}
+
+  const getReviewCandidateName = (referral) => {
+    const details = referral?.additional_data?.candidate_details || {}
+    return details.name || details.email || referral?.candidate_id || 'Candidate'
+  }
+
   return (
     <div className="flex min-h-screen overflow-hidden rounded-none border-none bg-white shadow-none">
       <aside className="flex w-64 flex-col bg-[#07153a] text-white">
@@ -159,7 +224,123 @@ function ManagerDashboard({ token, currentUser, setError, setMessage, onLogout }
           </div>
         )}
 
-        {activeTab !== 'sla' && (
+        {activeTab === 'referrals' && (
+          <div className="space-y-6 p-8">
+            <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5">
+              <h2 className="text-3xl font-bold text-indigo-900">Administrative Referral Review</h2>
+              <p className="mt-1 text-sm text-indigo-700">Admin gatekeeper step for submitted internship referrals.</p>
+            </div>
+
+            {currentUser?.role !== 'admin' ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
+                Referral review actions are available only for admin accounts.
+              </div>
+            ) : (
+              <>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="rounded-2xl border bg-white p-4">
+                    <p className="text-xs font-semibold text-slate-500">Pending Reviews</p>
+                    <p className="text-4xl font-bold text-slate-800">{reviewQueue.length}</p>
+                  </div>
+                  <div className="rounded-2xl border bg-white p-4 md:col-span-2">
+                    <label className="text-xs font-semibold text-slate-500">Select Referral</label>
+                    <select
+                      value={selectedReviewId}
+                      onChange={(event) => setSelectedReviewId(event.target.value)}
+                      className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    >
+                      <option value="">Select submitted referral</option>
+                      {reviewQueue.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {getReviewCandidateName(item)} · {item.id.slice(0, 8)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {!selectedReviewReferral ? (
+                  <div className="rounded-2xl border bg-white p-6 text-sm text-slate-500">No referral selected.</div>
+                ) : (
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div className="rounded-2xl border bg-white p-5 space-y-4">
+                      <h3 className="text-xl font-bold text-slate-800">Candidate Information</h3>
+                      <p className="text-sm text-slate-700"><span className="font-semibold">Name:</span> {candidateDetails?.name || 'Not provided'}</p>
+                      <p className="text-sm text-slate-700"><span className="font-semibold">Email:</span> {candidateDetails?.email || 'Not provided'}</p>
+                      <p className="text-sm text-slate-700"><span className="font-semibold">Phone:</span> {candidateDetails?.phone || 'Not provided'}</p>
+                      <div>
+                        <h4 className="text-sm font-semibold text-slate-800">Resume</h4>
+                        {reviewData?.uploaded_resume_url ? (
+                          <a href={reviewData.uploaded_resume_url} target="_blank" rel="noreferrer" className="text-sm font-semibold text-indigo-600 hover:underline">
+                            Open Uploaded Resume
+                          </a>
+                        ) : (
+                          <p className="text-sm text-slate-500">No resume uploaded.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border bg-white p-5 space-y-4">
+                      <h3 className="text-xl font-bold text-slate-800">Internship Details</h3>
+                      <p className="text-sm text-slate-700"><span className="font-semibold">Title:</span> {internshipDetails?.internship_title || 'Not provided'}</p>
+                      <p className="text-sm text-slate-700"><span className="font-semibold">Department:</span> {internshipDetails?.department_function || 'Not provided'}</p>
+                      <p className="text-sm text-slate-700"><span className="font-semibold">Duration:</span> {internshipDetails?.duration || 'Not provided'}</p>
+                      <p className="text-sm text-slate-700"><span className="font-semibold">Location:</span> {internshipDetails?.location || selectedReviewReferral.location || 'Not provided'}</p>
+                    </div>
+
+                    <div className="rounded-2xl border bg-white p-5 space-y-4">
+                      <h3 className="text-xl font-bold text-slate-800">Project Justification</h3>
+                      <p className="text-sm text-slate-700 whitespace-pre-wrap">{projectInfo?.business_justification || 'Not provided'}</p>
+                    </div>
+
+                    <div className="rounded-2xl border bg-white p-5 space-y-4">
+                      <h3 className="text-xl font-bold text-slate-800">Mentor Assignment</h3>
+                      <p className="text-sm text-slate-700"><span className="font-semibold">Mentor Name:</span> {mentorDetails?.mentor_name || 'Not provided'}</p>
+                      <p className="text-sm text-slate-700"><span className="font-semibold">Mentor Email:</span> {mentorDetails?.mentor_email || 'Not provided'}</p>
+                      <p className="text-sm text-slate-700"><span className="font-semibold">Mentor Department:</span> {mentorDetails?.mentor_department || 'Not provided'}</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="rounded-2xl border bg-white p-5 space-y-3">
+                  <h3 className="text-xl font-bold text-slate-800">Review Decision</h3>
+                  <textarea
+                    value={reviewNotes}
+                    onChange={(event) => setReviewNotes(event.target.value)}
+                    rows={4}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Add review notes (required for reject/request changes)"
+                  />
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      onClick={() => handleAdminReview('APPROVE')}
+                      disabled={loading || !selectedReviewReferral}
+                      className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:bg-slate-300"
+                    >
+                      {reviewActionLoading === 'APPROVE' ? 'Approving...' : 'Approve'}
+                    </button>
+                    <button
+                      onClick={() => handleAdminReview('REJECT')}
+                      disabled={loading || !selectedReviewReferral}
+                      className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500 disabled:bg-slate-300"
+                    >
+                      {reviewActionLoading === 'REJECT' ? 'Rejecting...' : 'Reject'}
+                    </button>
+                    <button
+                      onClick={() => handleAdminReview('REQUEST_CHANGES')}
+                      disabled={loading || !selectedReviewReferral}
+                      className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-amber-400 disabled:bg-slate-300"
+                    >
+                      {reviewActionLoading === 'REQUEST_CHANGES' ? 'Sending...' : 'Request Changes'}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {activeTab !== 'sla' && activeTab !== 'referrals' && (
           <div className="space-y-6 p-8">
             <div className="grid gap-4 md:grid-cols-5">
               <div className="rounded-2xl border bg-white p-4"><p className="text-xs font-semibold text-slate-500">TOTAL REFERRALS</p><p className="text-5xl font-bold text-slate-800">{metrics.total}</p></div>

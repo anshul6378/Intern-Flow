@@ -1,4 +1,5 @@
-﻿import { useEffect, useState } from 'react'
+﻿/* eslint-disable no-unused-vars */
+import { useEffect, useState } from 'react'
 
 import ReferrerDashboard from './components/dashboards/ReferrerDashboard'
 import CandidateDashboard from './components/dashboards/CandidateDashboard'
@@ -17,6 +18,16 @@ const EMPTY_REGISTER = {
 const EMPTY_LOGIN = {
   email: '',
   password: '',
+}
+
+const FIXED_ADMIN_LOGIN = {
+  email: 'admin@gmail.com',
+  password: 'admin123',
+}
+
+const FIXED_HR_LOGIN = {
+  email: 'HR@hexaware.com',
+  password: 'HR@123',
 }
 
 const EMPTY_CLAIM = {
@@ -221,13 +232,18 @@ function App() {
       ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
     }
 
-    const response = await fetch(`/api/v1${path}`, {
-      ...options,
-      headers: {
-        ...authHeaders,
-        ...(options.headers || {}),
-      },
-    })
+    let response
+    try {
+      response = await fetch(`/api/v1${path}`, {
+        ...options,
+        headers: {
+          ...authHeaders,
+          ...(options.headers || {}),
+        },
+      })
+    } catch {
+      throw new Error('Unable to reach server. Please ensure backend is running and CORS is configured.')
+    }
 
     const data = await parseResponse(response)
     if (!response.ok) {
@@ -800,6 +816,7 @@ function App() {
     { value: 'referrer', label: 'Referrer', description: 'Submit and track internship referrals through the pipeline.' },
     { value: 'candidate', label: 'Candidate', description: 'Complete your joining form, sign your NDA, and track milestones.' },
     { value: 'mentor', label: 'Mentor', description: 'Guide your interns, review project briefs, and confirm start dates.' },
+    { value: 'hr', label: 'HR', description: 'Verify onboarding, manage NDA approvals, and run internship operations.' },
     { value: 'admin', label: 'Admin', description: 'Monitor SLA compliance, provision IDs, and generate reports.' },
   ]
 
@@ -831,6 +848,15 @@ function App() {
       loginIcon: '->',
       claimIcon: 'key',
     },
+    hr: {
+      accent: '#f59e0b',
+      accentSoft: 'rgba(245,158,11,0.16)',
+      accentBorder: 'rgba(245,158,11,0.6)',
+      tagline: 'Use the fixed HR account to review onboarding and run operations.',
+      icon: '+',
+      loginIcon: '->',
+      claimIcon: 'key',
+    },
     admin: {
       accent: '#10b981',
       accentSoft: 'rgba(16,185,129,0.16)',
@@ -844,6 +870,10 @@ function App() {
 
   const authTheme = authThemeByPortal[authPortal]
   const isClaimPortal = authPortal === 'candidate' || authPortal === 'mentor'
+  const isAdminPortal = authPortal === 'admin'
+  const isHrPortal = authPortal === 'hr'
+  const isFixedCredentialPortal = isAdminPortal || isHrPortal
+  const fixedPortalLogin = isAdminPortal ? FIXED_ADMIN_LOGIN : FIXED_HR_LOGIN
 
   return (
     <div className={showAuthPanel ? 'min-h-screen bg-[#020b2a] text-white' : 'min-h-screen bg-[#e8edf4] text-slate-900'}>
@@ -880,6 +910,12 @@ function App() {
                     onClick={() => {
                       setAuthPortal(item.value)
                       setRegisterForm((current) => ({ ...current, role: item.value }))
+                      if (item.value === 'admin') {
+                        setLoginForm(FIXED_ADMIN_LOGIN)
+                      }
+                      if (item.value === 'hr') {
+                        setLoginForm(FIXED_HR_LOGIN)
+                      }
                       if (item.value === 'candidate' || item.value === 'mentor') {
                         setClaimForm((current) => ({ ...current, role: item.value }))
                       }
@@ -947,7 +983,8 @@ function App() {
                 </form>
               </div>
             ) : (
-              <div className="mt-7 grid gap-4 lg:grid-cols-2">
+              <div className={`mt-7 grid gap-4 ${isFixedCredentialPortal ? 'lg:grid-cols-1' : 'lg:grid-cols-2'}`}>
+                {!isFixedCredentialPortal && (
                 <form onSubmit={handleRegister} className="rounded-3xl border border-[#223664] bg-[#101d3f] p-5 shadow-[0_12px_28px_rgba(2,8,31,0.4)]">
                   <div className="flex items-center justify-between">
                     <div>
@@ -982,24 +1019,33 @@ function App() {
                     {loading ? 'Working...' : 'Create account'}
                   </button>
                 </form>
+                )}
 
                 <form onSubmit={handleLogin} className="rounded-3xl border border-[#223664] bg-[#101d3f] p-5 shadow-[0_12px_28px_rgba(2,8,31,0.4)]">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Existing</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{isFixedCredentialPortal ? (isAdminPortal ? 'General Admin' : 'General HR') : 'Existing'}</p>
                       <h2 className="mt-1 text-2xl font-bold text-white">Sign In</h2>
                     </div>
                     <div className="rounded-xl px-3 py-1.5 text-base font-bold text-white" style={{ backgroundColor: authTheme.accent }}>{authTheme.loginIcon}</div>
                   </div>
 
+                  {isFixedCredentialPortal && (
+                    <p className="mt-4 rounded-xl border border-emerald-300/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+                      {isAdminPortal
+                        ? 'A single general admin account is used for all approvals.'
+                        : 'A single general HR account is used for HR operations.'}
+                    </p>
+                  )}
+
                   <div className="mt-6 space-y-4">
                     <div>
                       <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="login_email">Email</label>
-                      <input id="login_email" name="email" type="email" value={loginForm.email} onChange={handleLoginChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="you@company.com" required />
+                      <input id="login_email" name="email" type="email" value={isFixedCredentialPortal ? fixedPortalLogin.email : loginForm.email} onChange={handleLoginChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="you@company.com" required readOnly={isFixedCredentialPortal} />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="login_password">Password</label>
-                      <input id="login_password" name="password" type="password" value={loginForm.password} onChange={handleLoginChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="********" required />
+                      <input id="login_password" name="password" type="password" value={isFixedCredentialPortal ? fixedPortalLogin.password : loginForm.password} onChange={handleLoginChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="********" required readOnly={isFixedCredentialPortal} />
                     </div>
                   </div>
 
@@ -1064,7 +1110,7 @@ function App() {
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Choose Your Portal</p>
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 {portalItems.map((item) => (
-                  <button key={item.value} onClick={() => { setAuthPortal(item.value); setShowAuthPanel(true); setRegisterForm((current) => ({ ...current, role: item.value })); if (item.value === 'candidate' || item.value === 'mentor') { setClaimForm((current) => ({ ...current, role: item.value })) } }} className="rounded-3xl border border-slate-300 bg-[#f5f8fc] p-4 text-left shadow-sm transition hover:shadow-md">
+                  <button key={item.value} onClick={() => { setAuthPortal(item.value); setShowAuthPanel(true); setRegisterForm((current) => ({ ...current, role: item.value })); if (item.value === 'admin') { setLoginForm(FIXED_ADMIN_LOGIN) } if (item.value === 'hr') { setLoginForm(FIXED_HR_LOGIN) } if (item.value === 'candidate' || item.value === 'mentor') { setClaimForm((current) => ({ ...current, role: item.value })) } }} className="rounded-3xl border border-slate-300 bg-[#f5f8fc] p-4 text-left shadow-sm transition hover:shadow-md">
                     <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-300 bg-white text-indigo-500">
                       <PortalRoleIcon role={item.value} className="h-4 w-4" />
                     </div>

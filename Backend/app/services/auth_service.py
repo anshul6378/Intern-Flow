@@ -11,6 +11,10 @@ from app.core.security import (
 
 
 class AuthService:
+    FIXED_ADMIN_EMAIL = "admin@gmail.com"
+    FIXED_ADMIN_PASSWORD = "admin123"
+    FIXED_HR_EMAIL = "hr@hexaware.com"
+    FIXED_HR_PASSWORD = "HR@123"
 
     @staticmethod
     def register_user(
@@ -29,6 +33,11 @@ class AuthService:
 
         if existing_user:
             raise Exception("User already exists")
+
+        if role == "admin":
+            existing_admin = UserRepository.get_user_by_role(db, "admin")
+            if existing_admin:
+                raise Exception("Admin account already exists. Please sign in with the existing admin account")
 
         if employee_id:
             existing_employee = UserRepository.get_user_by_employee_id(
@@ -69,6 +78,72 @@ class AuthService:
         email: str,
         password: str
     ):
+
+        normalized_email = email.strip().lower()
+
+        if normalized_email == AuthService.FIXED_ADMIN_EMAIL:
+            if password != AuthService.FIXED_ADMIN_PASSWORD:
+                raise Exception("Invalid credentials")
+
+            user = UserRepository.get_user_by_email(db, AuthService.FIXED_ADMIN_EMAIL)
+
+            if not user:
+                user = User(
+                    email=AuthService.FIXED_ADMIN_EMAIL,
+                    full_name="General Admin",
+                    hashed_password=hash_password(AuthService.FIXED_ADMIN_PASSWORD),
+                    role="admin",
+                    employee_id=None,
+                )
+                user = UserRepository.create_user(db, user)
+            elif user.role != "admin":
+                raise Exception("Configured admin email is assigned to a non-admin user")
+            elif not verify_password(AuthService.FIXED_ADMIN_PASSWORD, user.hashed_password):
+                user.hashed_password = hash_password(AuthService.FIXED_ADMIN_PASSWORD)
+                db.commit()
+                db.refresh(user)
+
+            token = create_access_token(
+                {
+                    "sub": str(user.id),
+                    "email": user.email,
+                    "role": user.role
+                }
+            )
+
+            return token
+
+        if normalized_email == AuthService.FIXED_HR_EMAIL:
+            if password != AuthService.FIXED_HR_PASSWORD:
+                raise Exception("Invalid credentials")
+
+            user = UserRepository.get_user_by_email(db, AuthService.FIXED_HR_EMAIL)
+
+            if not user:
+                user = User(
+                    email=AuthService.FIXED_HR_EMAIL,
+                    full_name="General HR",
+                    hashed_password=hash_password(AuthService.FIXED_HR_PASSWORD),
+                    role="hr",
+                    employee_id=None,
+                )
+                user = UserRepository.create_user(db, user)
+            elif user.role != "hr":
+                raise Exception("Configured HR email is assigned to a non-HR user")
+            elif not verify_password(AuthService.FIXED_HR_PASSWORD, user.hashed_password):
+                user.hashed_password = hash_password(AuthService.FIXED_HR_PASSWORD)
+                db.commit()
+                db.refresh(user)
+
+            token = create_access_token(
+                {
+                    "sub": str(user.id),
+                    "email": user.email,
+                    "role": user.role
+                }
+            )
+
+            return token
 
         user = UserRepository.get_user_by_email(
             db,

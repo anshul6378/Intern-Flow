@@ -53,7 +53,11 @@ class WorkflowService:
 			raise LookupError("Referral not found")
 
 		current_state = cast(str, referral.state)
+		current_status = cast(str, referral.status)
 		WorkflowService.validate_transition(current_state=current_state, next_state=next_state)
+
+		if next_state in {"READY_TO_START", "IN_PROGRESS"} and current_status != "NDA_COMPLETED":
+			raise ValueError("Internship activation is blocked until NDA completion (status NDA_COMPLETED)")
 
 		referral = ReferralRepository.update_state(db, referral_id, next_state)
 		if not referral:

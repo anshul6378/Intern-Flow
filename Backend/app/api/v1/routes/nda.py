@@ -3,19 +3,21 @@ from __future__ import annotations
 from typing import cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles
 from app.models.user import User
 from app.schemas.nda import (
+    NDAApproveRequest,
     NDAListItemResponse,
     NDAListResponse,
     NDARejectRequest,
     NDAResponse,
     NDASendRequest,
     NDASignRequest,
+    NDAUploadResponse,
 )
 from app.services.nda_service import NDAService
 
@@ -83,12 +85,61 @@ def sign_nda(
             current_user_id=cast(UUID, current_user.id),
             current_user_role=cast(str, current_user.role),
             archived_url=payload.archived_url,
+            signed_file_name=payload.signed_file_name,
         )
         return NDAResponse.model_validate(nda)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+
+
+@router.post("/{referral_id}/nda/upload-signed", response_model=NDAUploadResponse)
+async def upload_signed_nda_copy(
+    referral_id: UUID,
+    signed_copy: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("candidate", "admin")),
+):
+    try:
+        upload_result = await NDAService.upload_signed_copy(
+            db=db,
+            referral_id=referral_id,
+            current_user_id=cast(UUID, current_user.id),
+            current_user_role=cast(str, current_user.role),
+            signed_copy=signed_copy,
+        )
+        return NDAUploadResponse.model_validate(upload_result)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post("/{referral_id}/nda/approve", response_model=NDAResponse)
+def approve_nda(
+    referral_id: UUID,
+    payload: NDAApproveRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("hr", "admin")),
+):
+    try:
+        nda = NDAService.approve_nda(
+            db=db,
+            referral_id=referral_id,
+            current_user_id=cast(UUID, current_user.id),
+            current_user_role=cast(str, current_user.role),
+            notes=payload.notes,
+        )
+        return NDAResponse.model_validate(nda)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.post("/{referral_id}/nda/reject", response_model=NDAResponse)

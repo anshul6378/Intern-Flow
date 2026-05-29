@@ -97,15 +97,27 @@ class NDADocumentRepository:
         signed_by: UUID,
         archived_url: str
     ) -> Optional[NDADocument]:
-        """Mark NDA as signed and archived."""
+        """Mark NDA signed copy as uploaded by candidate."""
         return NDADocumentRepository.update(
             db,
             nda_id,
-            status="SIGNED",
+            status="UPLOADED",
             signed_at=datetime.utcnow(),
             signed_by=signed_by,
             archived_url=archived_url,
             archived_at=datetime.utcnow()
+        )
+
+    @staticmethod
+    def mark_completed(
+        db: Session,
+        nda_id: UUID,
+    ) -> Optional[NDADocument]:
+        """Mark NDA as HR-approved and complete."""
+        return NDADocumentRepository.update(
+            db,
+            nda_id,
+            status="COMPLETED",
         )
 
     @staticmethod

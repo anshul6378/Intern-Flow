@@ -39,6 +39,11 @@ WORKFLOW_EVENT_TYPES = {
     "ELIGIBILITY_CHECK_STARTED": "AI eligibility review started",
     "ELIGIBILITY_PASSED": "All eligibility checks passed",
     "ELIGIBILITY_FAILED": "Eligibility check failed",
+    "ADMIN_REVIEW_APPROVED": "Referral approved by admin review",
+    "ADMIN_REVIEW_REJECTED": "Referral rejected by admin review",
+    "ADMIN_REVIEW_CHANGES_REQUESTED": "Admin requested referral changes",
+    "MENTOR_REVIEW_APPROVED": "Candidate approved by mentor review",
+    "MENTOR_REVIEW_REJECTED": "Candidate rejected by mentor review",
     
     # Joining form
     "JOINING_FORM_CREATED": "Joining form created for candidate",
@@ -72,10 +77,12 @@ WORKFLOW_EVENT_TYPES = {
     "AD_DEPROVISIONED": "AD account deactivated",
     "ADMIN_ACCESS_REVOKED": "Site/physical access revoked",
     "CERTIFICATE_REQUESTED": "Certificate request sent to mentor",
+    "CERTIFICATE_GENERATED": "Certificate artifacts generated",
     "CERTIFICATE_ISSUED": "Certificate generated and sent",
     "REFERRAL_CLOSED": "Internship fully closed",
     
     # System events
+    "NOTIFICATION_SENT": "System notification dispatched",
     "SYSTEM_ERROR": "System error occurred",
     "MANUAL_OVERRIDE": "Manual override/intervention by staff",
     "SLA_BREACH": "SLA deadline passed",

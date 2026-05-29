@@ -77,7 +77,7 @@ class JoiningFormSubmit(BaseModel):
     address: AddressSchema
     emergency_contact: EmergencyContactSchema
     education_history: List[EducationEntrySchema]
-    employment_history: List[EmploymentEntrySchema]
+    employment_history: Optional[List[EmploymentEntrySchema]] = None
     government_ids: List[GovernmentIDSchema]
     declarations_signed: bool = Field(default=True)
 

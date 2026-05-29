@@ -106,7 +106,9 @@ class CertificateRepository:
         db: Session,
         cert_id: UUID,
         template_used: str,
-        archived_url: str
+        certificate_pdf_url: str,
+        letterhead_pdf_url: str,
+        archive_copy_url: str,
     ) -> Optional[Certificate]:
         """Mark certificate as generated."""
         return CertificateRepository.update(
@@ -114,18 +116,29 @@ class CertificateRepository:
             cert_id,
             status="GENERATED",
             template_used=template_used,
-            archived_url=archived_url,
+            certificate_pdf_url=certificate_pdf_url,
+            letterhead_pdf_url=letterhead_pdf_url,
+            archive_copy_url=archive_copy_url,
+            archived_url=archive_copy_url,
             archived_at=datetime.utcnow(),
             issued_date=datetime.utcnow()
         )
 
     @staticmethod
-    def mark_issued(db: Session, cert_id: UUID) -> Optional[Certificate]:
+    def mark_issued(
+        db: Session,
+        cert_id: UUID,
+        candidate_download_url: str,
+        candidate_email_sent_to: str,
+    ) -> Optional[Certificate]:
         """Mark certificate as issued."""
         return CertificateRepository.update(
             db,
             cert_id,
-            status="ISSUED"
+            status="ISSUED",
+            candidate_download_url=candidate_download_url,
+            candidate_email_sent_to=candidate_email_sent_to,
+            candidate_email_sent_at=datetime.utcnow(),
         )
 
     @staticmethod

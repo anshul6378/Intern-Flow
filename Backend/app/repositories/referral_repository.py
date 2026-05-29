@@ -60,6 +60,39 @@ class ReferralRepository:
         return db.query(Referral).filter(Referral.mentor_id == mentor_id).all()
 
     @staticmethod
+    def find_active_duplicate(
+        db: Session,
+        candidate_id: UUID,
+        mentor_id: UUID,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> Optional[Referral]:
+        """Find duplicate active referral for the same candidate+mentor pair."""
+        query = db.query(Referral).filter(
+            Referral.candidate_id == candidate_id,
+            Referral.mentor_id == mentor_id,
+            Referral.status.in_(["ACTIVE", "ON_HOLD"]),
+            Referral.state != "CLOSED",
+        )
+
+        candidates = query.order_by(Referral.created_at.desc()).all()
+        if not candidates:
+            return None
+
+        # If dates are not specified, treat any existing active referral as duplicate.
+        if not start_date or not end_date:
+            return candidates[0]
+
+        for referral in candidates:
+            existing_start = referral.start_date or start_date
+            existing_end = referral.end_date or end_date
+            overlaps = existing_end >= start_date and end_date >= existing_start
+            if overlaps:
+                return referral
+
+        return None
+
+    @staticmethod
     def get_by_state(db: Session, state: str) -> List[Referral]:
         """Get all referrals in a specific workflow state."""
         return db.query(Referral).filter(Referral.state == state).all()
@@ -154,10 +187,11 @@ class ReferralRepository:
         hr_states = [
             "JOINING_FORM_SUBMITTED",
             "NDA_SIGNED",
+            "READY_TO_START",
             "NON_WORKER_ID_PENDING",
             "IN_CLOSURE",
         ]
-        query = db.query(Referral).filter(Referral.state.in_(hr_states), Referral.status == "ACTIVE")
+        query = db.query(Referral).filter(Referral.state.in_(hr_states), Referral.status != "CLOSED")
         total = query.count()
         results = query.order_by(Referral.updated_at.desc()).offset(skip).limit(limit).all()
         return results, total

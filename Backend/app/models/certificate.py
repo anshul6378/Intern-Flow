@@ -30,6 +30,12 @@ class Certificate(Base):
     # Generation & issuance
     issued_date = Column(DateTime, nullable=True)  # When certificate was generated
     template_used = Column(String, nullable=True)  # Certificate template version
+    certificate_pdf_url = Column(String, nullable=True)  # Standard certificate PDF URL
+    letterhead_pdf_url = Column(String, nullable=True)  # Company letterhead version URL
+    archive_copy_url = Column(String, nullable=True)  # Archived compliance copy URL
+    candidate_download_url = Column(String, nullable=True)  # Download link shared with candidate
+    candidate_email_sent_to = Column(String, nullable=True)  # Candidate email receiving copy
+    candidate_email_sent_at = Column(DateTime, nullable=True)  # When email copy was sent
     archived_url = Column(String, nullable=True)  # S3/storage URL of final PDF
     archived_at = Column(DateTime, nullable=True)
     

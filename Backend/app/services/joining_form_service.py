@@ -86,7 +86,7 @@ class JoiningFormService:
         form = self.get_or_create_form(referral_id)
         
         # Validate all required fields are present
-        required_fields = ["personal_details", "address", "emergency_contact", "education_history", "employment_history", "government_ids"]
+        required_fields = ["personal_details", "address", "emergency_contact", "education_history", "government_ids"]
         for field in required_fields:
             if field not in form_data or not form_data[field]:
                 raise ValueError(f"Missing required field: {field}")
@@ -181,7 +181,7 @@ class JoiningFormService:
             raise ValueError("Failed to approve joining form")
         
         # Once HR approves, the next stage is NDA issuance.
-        self.referral_repo.update_state(self.db, referral_id, "NDA_PENDING")
+        self.referral_repo.update(self.db, referral_id, status="HR_VERIFIED", state="NDA_PENDING")
         
         # Log approval event
         self.event_repo.create(
@@ -220,7 +220,8 @@ class JoiningFormService:
         if not form:
             raise ValueError("Failed to reject joining form")
         
-        # Keep referral state as JOINING_FORM_PENDING (candidate needs to resubmit)
+        # Return referral to candidate for corrections.
+        self.referral_repo.update(self.db, referral_id, status="CORRECTIONS_REQUIRED", state="JOINING_FORM_PENDING")
         
         # Log rejection event
         self.event_repo.create(
@@ -228,7 +229,7 @@ class JoiningFormService:
             referral_id=referral_id,
             event_type="JOINING_FORM_REJECTED",
             triggered_by=current_user_id,
-            description=f"HR rejected joining form. Reason: {notes or 'See notes in form'}",
+            description=f"HR requested corrections on joining form. Reason: {notes or 'See notes in form'}",
             data={
                 "form_id": str(form.id),
                 "reason": notes
