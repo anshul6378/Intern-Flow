@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+const NOTICE_TIMEOUT_MS = 3000
+
 function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
   const [hrView, setHrView] = useState('dashboard')
   const [rosterSearch, setRosterSearch] = useState('')
@@ -15,6 +17,7 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
   const [pendingClosures, setPendingClosures] = useState([])
   const [queueReferrals, setQueueReferrals] = useState([])
   const [allReferrals, setAllReferrals] = useState([])
+  const [candidateProfilesByReferral, setCandidateProfilesByReferral] = useState({})
   const [activeInterns, setActiveInterns] = useState([])
   const [upcomingCompletions, setUpcomingCompletions] = useState([])
   const [recentEvents, setRecentEvents] = useState([])
@@ -53,6 +56,18 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
     return data
   }
 
+  useEffect(() => {
+    if (!localNotice.text) {
+      return undefined
+    }
+
+    const timeoutId = setTimeout(() => {
+      setLocalNotice({ type: '', text: '' })
+    }, NOTICE_TIMEOUT_MS)
+
+    return () => clearTimeout(timeoutId)
+  }, [localNotice])
+
   const refreshData = async () => {
     setLoading(true)
     setLocalNotice({ type: '', text: '' })
@@ -67,19 +82,83 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
       const extensionQueue = await apiRequest('/referrals/hr/extension-requests')
       setPendingExtensions(extensionQueue.items || [])
 
-      const closureQueue = await apiRequest('/referrals?state=IN_CLOSURE&status=COMPLETED&limit=200')
+      const closureQueue = await apiRequest('/referrals?state=IN_CLOSURE&status=COMPLETED&limit=100')
       setPendingClosures(closureQueue.items || [])
 
       const queue = await apiRequest('/referrals/hr/queue')
       const queueItems = queue.items || []
       setQueueReferrals(queueItems)
 
-      const allReferralsResponse = await apiRequest('/referrals?limit=500')
+      const allReferralsResponse = await apiRequest('/referrals?limit=100')
       setAllReferrals(allReferralsResponse.items || [])
 
-      const allActive = await apiRequest('/referrals?status=ACTIVE&limit=200')
+      const allActive = await apiRequest('/referrals?status=ACTIVE&limit=100')
       const activeItems = (allActive.items || []).filter((item) => ['IN_PROGRESS', 'EXTENDED'].includes(item.state))
       setActiveInterns(activeItems)
+
+      const referralIdsToResolve = Array.from(new Set([
+        ...forms.map((item) => item.referral_id),
+        ...((ndaQueue.items || []).map((item) => item.referral_id)),
+        ...((extensionQueue.items || []).map((item) => item.id)),
+        ...((closureQueue.items || []).map((item) => item.id)),
+        ...(queueItems.map((item) => item.id)),
+        ...(activeItems.map((item) => item.id)),
+      ].filter(Boolean).map((value) => String(value))))
+
+      if (referralIdsToResolve.length) {
+        const referralLookup = [...(allReferralsResponse.items || []), ...queueItems]
+        const nextProfiles = {}
+
+        referralIdsToResolve.forEach((referralId) => {
+          const referral = referralLookup.find((item) => String(item.id) === String(referralId))
+          const candidateDetails = referral?.additional_data?.candidate_details || {}
+          const fallbackName =
+            referral?.candidate_name
+            || candidateDetails.name
+            || candidateDetails.full_name
+            || referral?.candidate?.name
+            || referral?.candidate?.full_name
+            || null
+          const fallbackEmail =
+            candidateDetails.email
+            || referral?.candidate_email
+            || referral?.candidate?.email
+            || null
+
+          if (fallbackName || fallbackEmail) {
+            nextProfiles[referralId] = {
+              name: fallbackName || '',
+              email: fallbackEmail || '',
+            }
+          }
+        })
+
+        const profileEntries = await Promise.all(
+          referralIdsToResolve.map(async (referralId) => {
+            try {
+              const form = await apiRequest(`/referrals/${referralId}/joining-form`)
+              return [
+                referralId,
+                {
+                  name: form?.personal_details?.name || '',
+                  email: form?.personal_details?.email || '',
+                },
+              ]
+            } catch {
+              return [referralId, null]
+            }
+          })
+        )
+
+        profileEntries.forEach(([referralId, profile]) => {
+          if (profile && (profile.name || profile.email)) {
+            nextProfiles[referralId] = profile
+          }
+        })
+        setCandidateProfilesByReferral(nextProfiles)
+      } else {
+        setCandidateProfilesByReferral({})
+      }
 
       const now = new Date()
       const upcoming = activeItems
@@ -120,6 +199,11 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
         return
       }
 
+      // Clear stale data before loading next referral details.
+      setRecentEvents([])
+      setSelectedFormStatus(null)
+      setSelectedFormDetails(null)
+
       try {
         const [timeline, formStatus, formDetails] = await Promise.all([
           apiRequest(`/referrals/${selectedReferralId}/timeline`),
@@ -130,6 +214,9 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
         setSelectedFormStatus(formStatus || null)
         setSelectedFormDetails(formDetails || null)
       } catch (err) {
+        setRecentEvents([])
+        setSelectedFormStatus(null)
+        setSelectedFormDetails(null)
         setError(err.message)
         setLocalNotice({ type: 'error', text: err.message || 'Failed to load timeline' })
       }
@@ -246,6 +333,21 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
       setMessage(`NDA approved for ${targetReferralId}`)
       setLocalNotice({ type: 'success', text: `NDA approved. Referral status updated to NDA_COMPLETED for ${targetReferralId}` })
       await refreshData()
+      // Reload timeline and form status for selected referral to ensure fresh data
+      if (String(targetReferralId) === String(selectedReferralId)) {
+        try {
+          const [timeline, formStatus, formDetails] = await Promise.all([
+            apiRequest(`/referrals/${targetReferralId}/timeline`),
+            apiRequest(`/referrals/${targetReferralId}/joining-form/status`),
+            apiRequest(`/referrals/${targetReferralId}/joining-form`),
+          ])
+          setRecentEvents(timeline.events || [])
+          setSelectedFormStatus(formStatus || null)
+          setSelectedFormDetails(formDetails || null)
+        } catch {
+          // Silently fail - data will still update from refreshData
+        }
+      }
     } catch (err) {
       setError(err.message)
       setLocalNotice({ type: 'error', text: err.message || 'Failed to approve NDA' })
@@ -516,14 +618,71 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
     }
   }
 
-  const selectedReferral = queueReferrals.find((item) => item.id === selectedReferralId) || null
+  const normalizeEmailName = (email) =>
+    email
+      ? email.split('@')[0].replace(/[._-]/g, ' ')
+      : ''
+
+  const getReferralById = (referralId) =>
+    allReferrals.find((item) => String(item.id) === String(referralId))
+    || queueReferrals.find((item) => String(item.id) === String(referralId))
+    || null
+
+  const getCandidateNameForReferral = (referralId) => {
+    if (!referralId) return 'Candidate'
+    const referralKey = String(referralId)
+    const referral = getReferralById(referralId)
+    const profile = candidateProfilesByReferral[referralKey] || {}
+    const details = referral?.additional_data?.candidate_details || {}
+    const selectedFormPersonal = String(selectedReferralId) === String(referralId) ? selectedFormDetails?.personal_details : null
+    const rawName =
+      selectedFormPersonal?.name
+      || profile.name
+      || referral?.candidate_name
+      || details.name
+      || details.full_name
+      || referral?.candidate?.name
+      || referral?.candidate?.full_name
+      || normalizeEmailName(referral?.candidate_email)
+      || normalizeEmailName(details.email)
+
+    if (rawName) {
+      return rawName
+    }
+
+    return `Candidate ${String(referralId).slice(-4)}`
+  }
+
+  const getCandidateEmailForReferral = (referralId) => {
+    if (!referralId) return 'No email'
+    const referralKey = String(referralId)
+    const referral = getReferralById(referralId)
+    const profile = candidateProfilesByReferral[referralKey] || {}
+    const details = referral?.additional_data?.candidate_details || {}
+    const selectedFormPersonal = String(selectedReferralId) === String(referralId) ? selectedFormDetails?.personal_details : null
+
+    return (
+      selectedFormPersonal?.email
+      || profile.email
+      || details.email
+      || referral?.candidate_email
+      || referral?.candidate?.email
+      || 'No email'
+    )
+  }
+
+  const selectedReferralDetails = getReferralById(selectedReferralId)
+  const selectedReferral = selectedReferralDetails
   const selectedPendingForm = pendingForms.find((form) => form.referral_id === selectedReferralId) || null
+  const selectedCandidateDetails = selectedReferralDetails?.additional_data?.candidate_details || {}
+  const selectedCandidateName = selectedReferralId ? getCandidateNameForReferral(selectedReferralId) : 'None'
+  const selectedCandidateEmail = getCandidateEmailForReferral(selectedReferralId)
   const selectedStatus = selectedReferral?.status || ''
   const selectedState = selectedReferral?.state || ''
   const hasJoiningFormCompleted = selectedFormStatus?.status === 'APPROVED'
   const hasNdaCompleted = selectedStatus === 'NDA_COMPLETED'
   const hasRequiredDocuments = Boolean(selectedFormDetails?.government_ids?.length)
-  const canActivateInternship = Boolean(selectedReferralId) && hasJoiningFormCompleted && hasNdaCompleted && hasRequiredDocuments
+  const canActivateInternship = Boolean(selectedReferralId) && hasNdaCompleted
   const statusChipClass =
     selectedStatus === 'ON_HOLD'
       ? 'bg-amber-100 text-amber-800 border-amber-200'
@@ -639,13 +798,7 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
             </div>
           </div>
 
-          <div>
-            <p className="px-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Insights</p>
-            <div className="mt-2 space-y-1">
-              <button className="w-full rounded-lg px-3 py-2 text-left text-slate-300 hover:bg-[#131f49]"><span className="inline-flex h-2 w-2 rounded-full bg-slate-500 mr-2" />Reports</button>
-              <button className="w-full rounded-lg px-3 py-2 text-left text-slate-300 hover:bg-[#131f49]"><span className="inline-flex h-2 w-2 rounded-full bg-slate-500 mr-2" />Settings</button>
-            </div>
-          </div>
+
         </nav>
 
         <div className="border-t border-white/10 px-4 py-4">
@@ -711,8 +864,8 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
                   <p className="mt-1 text-4xl font-bold text-slate-800">{pendingForms.length}</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
-                  <p className="text-sm font-bold uppercase tracking-[0.08em] text-slate-500">Selected Referral</p>
-                  <p className="mt-1 text-xl font-bold text-indigo-600">{selectedReferralId || 'None'}</p>
+                  <p className="text-sm font-bold uppercase tracking-[0.08em] text-slate-500">Selected Candidate</p>
+                  <p className="mt-1 text-xl font-bold text-indigo-600">{selectedCandidateName}</p>
                 </div>
                 <div className="flex items-center justify-end rounded-xl px-5 py-4">
                   <button
@@ -727,7 +880,7 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="rounded-xl border border-emerald-300 bg-emerald-50 px-5 py-4">
-                  <p className="text-sm font-bold uppercase tracking-[0.08em] text-emerald-700">Step 9: Active Interns</p>
+                  <p className="text-sm font-bold uppercase tracking-[0.08em] text-emerald-700">Active Interns</p>
                   <p className="mt-1 text-4xl font-bold text-emerald-700">{activeInterns.length}</p>
                   <p className="text-sm text-emerald-700">HR monitoring currently active internship records.</p>
                 </div>
@@ -774,12 +927,12 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
           {activeTab === 'forms' && (
             <div className="space-y-3">
               <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
-                <h3 className="text-lg font-semibold text-indigo-900">Step 6: HR Reviews Joining Form</h3>
+                <h3 className="text-lg font-semibold text-indigo-900">HR Reviews Joining Form</h3>
                 <p className="text-sm text-indigo-800">Verify candidate details, uploaded documents, eligibility and completeness before decision.</p>
               </div>
 
               <div className="rounded-lg border border-gray-200 p-4">
-                <label className="text-sm font-semibold text-gray-700">Review Referral</label>
+                <label className="text-sm font-semibold text-gray-700">Review Candidate</label>
                 <select
                   value={selectedReferralId}
                   onChange={(event) => setSelectedReferralId(event.target.value)}
@@ -787,7 +940,7 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
                 >
                   <option value="">Select pending joining form</option>
                   {pendingForms.map((form) => (
-                    <option key={form.id} value={form.referral_id}>{form.referral_id}</option>
+                    <option key={form.id} value={form.referral_id}>{getCandidateNameForReferral(form.referral_id)} - {String(form.referral_id).slice(-6)}</option>
                   ))}
                 </select>
 
@@ -796,8 +949,8 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
                     <div className="grid gap-3 md:grid-cols-2">
                       <div className="rounded border border-gray-200 bg-white p-3">
                         <p className="font-semibold text-gray-800">Candidate Details</p>
-                        <p className="text-gray-600">{selectedFormDetails?.personal_details?.name || 'Not available'}</p>
-                        <p className="text-gray-600">{selectedFormDetails?.personal_details?.email || 'No email'}</p>
+                        <p className="text-gray-600">{selectedFormDetails?.personal_details?.name || selectedCandidateDetails.name || selectedCandidateDetails.full_name || selectedCandidateName}</p>
+                        <p className="text-gray-600">{selectedCandidateEmail}</p>
                       </div>
                       <div className="rounded border border-gray-200 bg-white p-3">
                         <p className="font-semibold text-gray-800">Uploaded Documents</p>
@@ -826,7 +979,7 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
                   <div key={form.id} className="rounded-lg border border-gray-200 p-4">
                     <div className="flex items-center justify-between gap-4">
                       <div>
-                        <p className="font-semibold text-gray-800">Referral: {form.referral_id}</p>
+                        <p className="font-semibold text-gray-800">Candidate: {getCandidateNameForReferral(form.referral_id)}</p>
                         <p className="text-sm text-gray-600">Form status: {form.status}</p>
                       </div>
                       <div className="flex gap-2">
@@ -854,120 +1007,168 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
 
           {activeTab === 'ops' && (
             <div className="space-y-6">
-              <div className="rounded-lg border border-gray-200 p-4 space-y-3">
-                <h4 className="font-semibold text-gray-800">NDA Review Queue</h4>
-                <p className="text-sm text-gray-600">Approve signed NDA copies uploaded by candidates.</p>
-                {!pendingNdas.length ? (
-                  <p className="text-sm text-gray-600">No NDAs pending HR approval.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {pendingNdas.map((ndaItem) => (
-                      <div key={ndaItem.id} className="flex flex-wrap items-center justify-between gap-3 rounded border border-gray-200 p-3">
-                        <div>
-                          <p className="text-sm font-semibold text-gray-800">Referral: {ndaItem.referral_id}</p>
-                          <p className="text-xs text-gray-600">Status: {ndaItem.status}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {ndaItem.archived_url ? (
-                            <a
-                              href={ndaItem.archived_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="rounded border border-indigo-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
-                            >
-                              View Signed Copy
-                            </a>
-                          ) : (
-                            <span className="text-xs text-gray-500">Signed copy unavailable</span>
-                          )}
-                          <button
-                            onClick={() => handleApproveNda(ndaItem.referral_id)}
-                            disabled={loading}
-                            className="rounded bg-emerald-600 px-3 py-2 text-white text-sm font-semibold hover:bg-emerald-700 disabled:bg-gray-400"
-                          >
-                            {actionLoading === 'nda-approve' ? 'Approving...' : 'Approve NDA'}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="rounded-lg border border-gray-200 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-gray-800">NDA Review Queue</h4>
+                    {pendingNdas.length > 0 && (
+                      <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-bold text-red-700">
+                        {pendingNdas.length}
+                      </span>
+                    )}
                   </div>
-                )}
-              </div>
-
-              <div className="rounded-lg border border-gray-200 p-4 space-y-3">
-                <h4 className="font-semibold text-gray-800">Step 10: Extension Requests</h4>
-                <p className="text-sm text-gray-600">Mentor-submitted extension requests pending HR review.</p>
-                {!pendingExtensions.length ? (
-                  <p className="text-sm text-gray-600">No extension requests pending review.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {pendingExtensions.map((item) => {
-                      const extensionRequest = item.additional_data?.extension_request || {}
-                      return (
-                        <div key={item.id} className="rounded border border-gray-200 p-3">
-                          <p className="text-sm font-semibold text-gray-800">Referral: {item.id}</p>
-                          <p className="text-xs text-gray-600">Current End Date: {item.end_date || 'N/A'}</p>
-                          <p className="text-xs text-gray-600">Requested End Date: {extensionRequest.new_end_date || 'N/A'}</p>
-                          <p className="text-xs text-gray-600">Reason: {extensionRequest.reason || 'N/A'}</p>
-                          <div className="mt-2 flex gap-2">
+                  <p className="text-sm text-gray-600">Approve signed NDA copies uploaded by candidates.</p>
+                  {!pendingNdas.length ? (
+                    <p className="text-sm text-gray-500">No NDAs pending approval.</p>
+                  ) : (
+                    <div className="space-y-2 mt-2 max-h-64 overflow-y-auto">
+                      {pendingNdas.map((ndaItem) => (
+                        <div
+                          key={ndaItem.id}
+                          onClick={() => setSelectedReferralId(ndaItem.referral_id)}
+                          className={`cursor-pointer rounded border p-2 text-sm transition ${
+                            selectedReferralId === ndaItem.referral_id
+                              ? 'border-indigo-500 bg-indigo-50'
+                              : 'border-gray-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex-1">
+                              <p className="font-semibold text-gray-800">{ndaItem.candidate_name || getCandidateNameForReferral(ndaItem.referral_id)}</p>
+                              <p className="text-xs text-gray-600">Status: {ndaItem.status}</p>
+                            </div>
                             <button
-                              onClick={() => handleExtensionReview(item.id, 'APPROVE')}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleApproveNda(ndaItem.referral_id)
+                              }}
                               disabled={loading}
-                              className="rounded bg-emerald-600 px-3 py-2 text-white text-xs font-semibold hover:bg-emerald-700 disabled:bg-gray-400"
+                              className="rounded bg-emerald-600 px-2 py-1 text-white text-xs font-semibold hover:bg-emerald-700 disabled:bg-gray-400 whitespace-nowrap"
                             >
-                              {actionLoading === 'extension-approve' ? 'Approving...' : 'Approve'}
-                            </button>
-                            <button
-                              onClick={() => handleExtensionReview(item.id, 'REJECT')}
-                              disabled={loading}
-                              className="rounded bg-rose-600 px-3 py-2 text-white text-xs font-semibold hover:bg-rose-700 disabled:bg-gray-400"
-                            >
-                              {actionLoading === 'extension-reject' ? 'Rejecting...' : 'Reject'}
+                              Approve
                             </button>
                           </div>
                         </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-              <div className="rounded-lg border border-gray-200 p-4 space-y-3">
-                <h4 className="font-semibold text-gray-800">Step 12: HR Closure Review</h4>
-                <p className="text-sm text-gray-600">Verify internship completion and pending activities before approving closure.</p>
-                {!pendingClosures.length ? (
-                  <p className="text-sm text-gray-600">No closure approvals pending.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {pendingClosures.map((item) => (
-                      <div key={item.id} className="rounded border border-gray-200 p-3">
-                        <p className="text-sm font-semibold text-gray-800">Referral: {item.id}</p>
-                        <p className="text-xs text-gray-600">Internship completed: Yes</p>
-                        <p className="text-xs text-gray-600">Pending activities: Must be none to approve</p>
-                        <div className="mt-2 flex gap-2">
-                          <button
-                            onClick={() => handleClosureReview(item.id, 'APPROVE')}
-                            disabled={loading}
-                            className="rounded bg-emerald-600 px-3 py-2 text-white text-xs font-semibold hover:bg-emerald-700 disabled:bg-gray-400"
-                          >
-                            {actionLoading === 'closure-approve' ? 'Approving...' : 'Approve Closure'}
-                          </button>
-                          <button
-                            onClick={() => handleClosureReview(item.id, 'REJECT')}
-                            disabled={loading}
-                            className="rounded bg-rose-600 px-3 py-2 text-white text-xs font-semibold hover:bg-rose-700 disabled:bg-gray-400"
-                          >
-                            {actionLoading === 'closure-reject' ? 'Rejecting...' : 'Reject'}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                <div className="rounded-lg border border-gray-200 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-gray-800">Extension Requests</h4>
+                    {pendingExtensions.length > 0 && (
+                      <span className="inline-flex items-center rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-bold text-orange-700">
+                        {pendingExtensions.length}
+                      </span>
+                    )}
                   </div>
-                )}
+                  <p className="text-sm text-gray-600">Mentor-submitted extension requests pending review.</p>
+                  {!pendingExtensions.length ? (
+                    <p className="text-sm text-gray-500">No extension requests pending.</p>
+                  ) : (
+                    <div className="space-y-2 mt-2 max-h-64 overflow-y-auto">
+                      {pendingExtensions.map((item) => (
+                        <div
+                          key={item.id}
+                          onClick={() => setSelectedReferralId(item.id)}
+                          className={`cursor-pointer rounded border p-2 text-sm transition ${
+                            selectedReferralId === item.id
+                              ? 'border-indigo-500 bg-indigo-50'
+                              : 'border-gray-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <p className="font-semibold text-gray-800">{getCandidateNameForReferral(item.id)}</p>
+                            <div className="flex gap-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleExtensionReview(item.id, 'APPROVE')
+                                }}
+                                disabled={loading}
+                                className="rounded bg-emerald-600 px-1.5 py-0.5 text-white text-xs font-semibold hover:bg-emerald-700 disabled:bg-gray-400"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleExtensionReview(item.id, 'REJECT')
+                                }}
+                                disabled={loading}
+                                className="rounded bg-rose-600 px-1.5 py-0.5 text-white text-xs font-semibold hover:bg-rose-700 disabled:bg-gray-400"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-600">New end date: {item.additional_data?.extension_request?.new_end_date || 'N/A'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-gray-200 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-gray-800">HR Closure Review</h4>
+                    {pendingClosures.length > 0 && (
+                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-700">
+                        {pendingClosures.length}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-600">Verify internship completion before approving.</p>
+                  {!pendingClosures.length ? (
+                    <p className="text-sm text-gray-500">No closure approvals pending.</p>
+                  ) : (
+                    <div className="space-y-2 mt-2 max-h-64 overflow-y-auto">
+                      {pendingClosures.map((item) => (
+                        <div
+                          key={item.id}
+                          onClick={() => setSelectedReferralId(item.id)}
+                          className={`cursor-pointer rounded border p-2 text-sm transition ${
+                            selectedReferralId === item.id
+                              ? 'border-indigo-500 bg-indigo-50'
+                              : 'border-gray-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <p className="font-semibold text-gray-800">{getCandidateNameForReferral(item.id)}</p>
+                            <div className="flex gap-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleClosureReview(item.id, 'APPROVE')
+                                }}
+                                disabled={loading}
+                                className="rounded bg-emerald-600 px-1.5 py-0.5 text-white text-xs font-semibold hover:bg-emerald-700 disabled:bg-gray-400"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleClosureReview(item.id, 'REJECT')
+                                }}
+                                disabled={loading}
+                                className="rounded bg-rose-600 px-1.5 py-0.5 text-white text-xs font-semibold hover:bg-rose-700 disabled:bg-gray-400"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-600">Ready for closure</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-3">
-                <h4 className="font-semibold text-emerald-900">Step 8: HR Activates Internship</h4>
+                <h4 className="font-semibold text-emerald-900">HR Activates Internship</h4>
                 <p className="text-sm text-emerald-800">Verify prerequisites, then activate internship and send start confirmation notifications.</p>
                 <div className="grid gap-2 text-sm md:grid-cols-3">
                   <p className="text-emerald-900">Joining Form: <span className="font-semibold">{hasJoiningFormCompleted ? 'Completed' : 'Pending'}</span></p>
@@ -984,14 +1185,14 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
               </div>
 
               <div className="rounded-lg border border-gray-200 p-4 space-y-3">
-                <h4 className="font-semibold text-gray-800">Step 9: Monitor Active Interns</h4>
+                <h4 className="font-semibold text-gray-800">Monitor Active Interns</h4>
                 {!activeInterns.length ? (
                   <p className="text-sm text-gray-600">No active internships at the moment.</p>
                 ) : (
                   <div className="space-y-2">
                     {activeInterns.slice(0, 6).map((item) => (
                       <div key={item.id} className="rounded border border-gray-200 p-3 text-sm">
-                        <p className="font-semibold text-gray-800">{item.id}</p>
+                        <p className="font-semibold text-gray-800">{getCandidateNameForReferral(item.id)}</p>
                         <p className="text-gray-600">State: {item.state} · End Date: {item.end_date || 'Not set'}</p>
                       </div>
                     ))}
@@ -1040,6 +1241,48 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
                   </div>
                 )}
               </div>
+
+              {selectedReferral && (
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4 space-y-3">
+                  <h4 className="font-semibold text-indigo-900">Referral Details</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-indigo-700">Candidate</p>
+                      <p className="mt-1 text-sm font-semibold text-indigo-900">{selectedCandidateName}</p>
+                      <p className="text-xs text-indigo-700">{selectedCandidateEmail}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-indigo-700">Mentor</p>
+                      <p className="mt-1 text-sm font-semibold text-indigo-900">{selectedReferralDetails?.additional_data?.mentor_details?.mentor_name || selectedReferralDetails?.additional_data?.mentor_details?.name || 'Unassigned'}</p>
+                      <p className="text-xs text-indigo-700">{selectedReferralDetails?.additional_data?.mentor_details?.mentor_email || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-indigo-700">Department</p>
+                      <p className="mt-1 text-sm font-semibold text-indigo-900">{selectedCandidateDetails.department || selectedReferralDetails?.additional_data?.department || 'General'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-indigo-700">Location</p>
+                      <p className="mt-1 text-sm font-semibold text-indigo-900">{selectedReferralDetails?.location || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-indigo-700">Start Date</p>
+                      <p className="mt-1 text-sm font-semibold text-indigo-900">{selectedReferralDetails?.start_date || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-indigo-700">End Date</p>
+                      <p className="mt-1 text-sm font-semibold text-indigo-900">{selectedReferralDetails?.end_date || '-'}</p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-indigo-700">Project Overview</p>
+                      <p className="mt-1 text-sm text-indigo-900">{selectedReferralDetails?.project_overview || 'No project overview provided'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-indigo-700">Relationship to Mentor</p>
+                      <p className="mt-1 text-sm font-semibold text-indigo-900">{selectedReferralDetails?.relationship_to_mentor || '-'}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="rounded-lg border border-gray-200 p-4 space-y-3">
                 <h4 className="font-semibold text-gray-800">Mentor Reassignment</h4>
@@ -1131,7 +1374,7 @@ function HRDashboard({ token, currentUser, setError, setMessage, onLogout }) {
               </div>
 
               <div className="rounded-lg border border-gray-200 p-4 space-y-3">
-                <h4 className="font-semibold text-gray-800">Step 14: HR Generates & Issues Certificate</h4>
+                <h4 className="font-semibold text-gray-800">HR Generates & Issues Certificate</h4>
                 <p className="text-sm text-gray-600">System generates certificate PDF, company letterhead version, and archive copy; candidate receives download link and email copy.</p>
                 <input
                   value={certificatePayload.request_form_url}

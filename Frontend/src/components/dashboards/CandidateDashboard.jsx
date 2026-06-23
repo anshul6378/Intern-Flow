@@ -18,6 +18,7 @@ const NAV = [
 ]
 
 const STEP_FLOW = ['Referral Submitted', 'Eligibility Confirmed', 'Joining Form', 'NDA Signed', 'ID Provisioned', 'Active']
+const NOTICE_TIMEOUT_MS = 3000
 
 function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout }) {
   const [activeTab, setActiveTab] = useState('status')
@@ -40,7 +41,20 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
   const [fieldErrors, setFieldErrors] = useState({})
   const [ndaSignedFileName, setNdaSignedFileName] = useState('')
   const [ndaSignedUrl, setNdaSignedUrl] = useState('')
+  const [ndaUploadSuccess, setNdaUploadSuccess] = useState(false)
   const [certificateRequestNotes, setCertificateRequestNotes] = useState('')
+
+  useEffect(() => {
+    if (!notice.text) {
+      return undefined
+    }
+
+    const timeoutId = setTimeout(() => {
+      setNotice({ type: '', text: '' })
+    }, NOTICE_TIMEOUT_MS)
+
+    return () => clearTimeout(timeoutId)
+  }, [notice])
 
   const apiRequest = async (path, options = {}) => {
     const headers = {
@@ -67,6 +81,14 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
   const selectedReferral = useMemo(() => myReferrals.find((item) => item.id === selectedReferralId) || null, [myReferrals, selectedReferralId])
   const mentorDetails = selectedReferral?.additional_data?.mentor_details || {}
   const isActiveInternship = selectedReferral?.state === 'IN_PROGRESS' || selectedReferral?.state === 'EXTENDED'
+  const mentorName = mentorDetails?.mentor_name || 'Mentor not assigned'
+  const mentorTitle = mentorDetails?.mentor_designation || mentorDetails?.mentor_role || mentorDetails?.mentor_department || 'Mentor'
+  const mentorInitials = mentorName
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || '')
+    .join('') || 'NA'
 
   const internshipDuration = useMemo(() => {
     if (!selectedReferral?.start_date || !selectedReferral?.end_date) {
@@ -133,6 +155,26 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
     return stageMap[selectedReferral.state] || 'Referral Submitted'
   }, [selectedReferral, isOnboardingPending])
 
+  const isJoiningFormSubmitted = useMemo(() => {
+    if (!selectedReferral) return false
+
+    const submittedOrBeyondStates = [
+      'JOINING_FORM_SUBMITTED',
+      'NDA_PENDING',
+      'NDA_SIGNED',
+      'NON_WORKER_ID_PENDING',
+      'CREDENTIALS_GENERATED',
+      'READY_TO_START',
+      'IN_PROGRESS',
+      'EXTENDED',
+      'IN_CLOSURE',
+      'COMPLETED',
+      'CLOSED',
+    ]
+
+    return submittedOrBeyondStates.includes(selectedReferral.state)
+  }, [selectedReferral])
+
   const refreshCandidateData = async () => {
     setLoading(true)
     setNotice({ type: '', text: '' })
@@ -194,13 +236,6 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, currentUser?.id])
 
-  const onReferralChange = async (event) => {
-    const nextId = event.target.value
-    setSelectedReferralId(nextId)
-    if (!nextId) return
-    await Promise.all([loadJoiningForm(nextId), loadNda(nextId), loadNonWorker(nextId), loadCertificate(nextId)])
-  }
-
   const handleDraftSave = async () => {
     if (!selectedReferralId) return
     setActionLoading('draft')
@@ -242,6 +277,10 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
 
   const handleSubmitForm = async () => {
     if (!selectedReferralId) return
+    if (isJoiningFormSubmitted) {
+      setNotice({ type: 'success', text: 'You have already submitted the joining form.' })
+      return
+    }
 
     const educationEntry = joiningForm.education_history?.[0] || {}
     const validationErrors = {}
@@ -348,6 +387,7 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
     const file = event.target.files?.[0]
     if (!file || !selectedReferralId) return
 
+    setNdaUploadSuccess(false)
     setActionLoading('upload-nda-file')
     setNotice({ type: '', text: '' })
     try {
@@ -361,8 +401,10 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
 
       setNdaSignedFileName(upload.file_name || file.name)
       setNdaSignedUrl(upload.archived_url || '')
+      setNdaUploadSuccess(true)
       setNotice({ type: 'success', text: 'Signed NDA file uploaded. Submit for HR review next.' })
     } catch (err) {
+      setNdaUploadSuccess(false)
       setNotice({ type: 'error', text: err.message || 'Failed to upload signed NDA file.' })
       setError(err.message)
     } finally {
@@ -395,6 +437,7 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
 
   const canRequestCertificate = selectedReferral && ['COMPLETED', 'CLOSURE_APPROVED', 'CLOSED'].includes(selectedReferral.status)
   const isCertificateAlreadyRequested = certificate && ['REQUEST_FORM_SENT', 'REQUESTED', 'GENERATED', 'ISSUED', 'ARCHIVED'].includes(certificate.status)
+  const ndaDownloadUrl = nda?.esign_url || '/sample-nda.doc'
 
   return (
     <div className="flex min-h-screen overflow-hidden rounded-none border-none bg-white shadow-none">
@@ -428,12 +471,6 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
         <header className="border-b border-slate-200 bg-white px-8 py-6">
           <h1 className="text-4xl font-bold text-slate-800">Hello, {currentUser?.full_name || 'Candidate'}</h1>
           <p className="mt-1 text-xl text-slate-500">Software Engineering Intern — Technology</p>
-          <div className="mt-3 w-80">
-            <select value={selectedReferralId} onChange={onReferralChange} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-              <option value="">Select referral</option>
-              {myReferrals.map((item) => <option key={item.id} value={item.id}>{item.id} · {item.state}</option>)}
-            </select>
-          </div>
         </header>
 
         {notice.text && (
@@ -444,6 +481,24 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
 
         {activeTab === 'status' && (
           <div className="space-y-6 p-8">
+            <div className="rounded-2xl border bg-white p-6">
+              <h3 className="text-3xl font-bold text-slate-800">Internship Journey</h3>
+              <div className="mt-6 grid grid-cols-6 gap-2">
+                {STEP_FLOW.map((label, index) => {
+                  const step = index + 1
+                  const active = step <= stepIndex
+                  return (
+                    <div key={label} className="text-center">
+                      <div className={`mx-auto mb-2 h-9 w-9 rounded-full border-2 ${active ? 'border-indigo-500 bg-indigo-100 text-indigo-700' : 'border-slate-300 bg-white text-slate-400'} flex items-center justify-center text-xs font-semibold`}>
+                        {step}
+                      </div>
+                      <p className={`text-xs font-semibold ${active ? 'text-indigo-700' : 'text-slate-500'}`}>{label}</p>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
             {selectedReferral?.status === 'CORRECTIONS_REQUIRED' && (
               <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5">
                 <p className="text-2xl font-bold text-amber-900">Corrections Required by HR</p>
@@ -465,32 +520,22 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
             <div className="rounded-2xl border border-indigo-200 bg-white p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-3xl font-bold text-slate-800">{isOnboardingPending ? 'Onboarding Invitation' : 'Action Required'}</p>
+                  <p className="text-3xl font-bold text-slate-800">{isJoiningFormSubmitted ? 'Joining Form Submitted' : isOnboardingPending ? 'Onboarding Invitation' : 'Action Required'}</p>
                   <p className="text-lg text-slate-500">
-                    {isOnboardingPending
+                    {isJoiningFormSubmitted
+                      ? 'Your joining form is already submitted. Please wait for HR review to continue onboarding.'
+                      : isOnboardingPending
                       ? 'Your mentor approved your profile. Please complete onboarding steps to continue.'
                       : 'Please complete your Joining Form to proceed with onboarding.'}
                   </p>
                 </div>
-                <button onClick={() => setActiveTab('documents')} className="rounded-lg bg-indigo-600 px-6 py-3 text-lg font-semibold text-white hover:bg-indigo-500">Complete Form</button>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border bg-white p-6">
-              <h3 className="text-3xl font-bold text-slate-800">Internship Journey</h3>
-              <div className="mt-6 grid grid-cols-6 gap-2">
-                {STEP_FLOW.map((label, index) => {
-                  const step = index + 1
-                  const active = step <= stepIndex
-                  return (
-                    <div key={label} className="text-center">
-                      <div className={`mx-auto mb-2 h-9 w-9 rounded-full border-2 ${active ? 'border-indigo-500 bg-indigo-100 text-indigo-700' : 'border-slate-300 bg-white text-slate-400'} flex items-center justify-center text-xs font-semibold`}>
-                        {step}
-                      </div>
-                      <p className={`text-xs font-semibold ${active ? 'text-indigo-700' : 'text-slate-500'}`}>{label}</p>
-                    </div>
-                  )
-                })}
+                <button
+                  onClick={() => setActiveTab('documents')}
+                  disabled={isJoiningFormSubmitted}
+                  className="rounded-lg bg-indigo-600 px-6 py-3 text-lg font-semibold text-white hover:bg-indigo-500 disabled:bg-slate-300 disabled:text-slate-600"
+                >
+                  {isJoiningFormSubmitted ? 'Already Submitted' : 'Complete Form'}
+                </button>
               </div>
             </div>
 
@@ -504,9 +549,9 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
               </div>
               <div className="rounded-2xl border bg-white p-6">
                 <h4 className="mb-3 text-xl font-bold text-slate-700">Your Mentor</h4>
-                <div className="rounded-full bg-indigo-100 p-4 text-center text-2xl font-bold text-indigo-700">PS</div>
-                <p className="mt-3 text-xl font-bold text-slate-800">Priya Sharma</p>
-                <p className="text-sm text-slate-500">Senior Staff Engineer</p>
+                <div className="rounded-full bg-indigo-100 p-4 text-center text-2xl font-bold text-indigo-700">{mentorInitials}</div>
+                <p className="mt-3 text-xl font-bold text-slate-800">{mentorName}</p>
+                <p className="text-sm text-slate-500">{mentorTitle}</p>
                 <button className="mt-4 w-full rounded-lg border border-indigo-200 px-4 py-2 text-sm font-semibold text-indigo-700">Send Message</button>
               </div>
             </div>
@@ -549,11 +594,17 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
                 <h3 className="text-4xl font-bold text-slate-800">Joining Form</h3>
                 <button onClick={handleDraftSave} disabled={actionLoading === 'draft'} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">{actionLoading === 'draft' ? 'Saving...' : 'Save Draft'}</button>
               </div>
-              <p className="mt-2 text-sm text-slate-500">Complete your onboarding form to move to JOINING_FORM_SUBMITTED.</p>
+              <p className="mt-2 text-sm text-slate-500">{isJoiningFormSubmitted ? 'Your joining form has already been submitted for HR review.' : 'Complete your onboarding form to move to JOINING_FORM_SUBMITTED.'}</p>
             </div>
 
+            {isJoiningFormSubmitted && (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-semibold text-emerald-800">Joining form already submitted</p>
+                <p className="mt-1 text-sm text-emerald-700">No further action is required right now. Please wait for HR review.</p>
+              </div>
+            )}
+
             <div className="rounded-2xl border bg-white p-6">
-              <h4 className="text-3xl font-bold text-slate-800">Step 5: Candidate Completes Joining Form</h4>
               <p className="mt-1 text-lg text-slate-500">Provide personal, academic, and identity details for onboarding.</p>
 
               <div className="mt-6 space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-5">
@@ -699,7 +750,18 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
 
                 <div className="mt-4 rounded-xl border border-dashed border-indigo-200 bg-white p-6 text-center">
                   <p className="text-sm text-slate-600">Upload Government ID Document</p>
-                  <input type="file" className="mx-auto mt-3 text-sm" onChange={(e) => setUploadedIdDoc(e.target.files?.[0]?.name || '')} />
+                  <input
+                    id="government-id-upload"
+                    type="file"
+                    className="hidden"
+                    onChange={(e) => setUploadedIdDoc(e.target.files?.[0]?.name || '')}
+                  />
+                  <label
+                    htmlFor="government-id-upload"
+                    className="mx-auto mt-3 inline-flex cursor-pointer rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100"
+                  >
+                    Attach File
+                  </label>
                   {uploadedIdDoc && <p className="mt-2 text-xs font-semibold text-emerald-700">{uploadedIdDoc} uploaded</p>}
                 </div>
 
@@ -716,7 +778,7 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
 
               <div className="mt-5 flex items-center justify-end gap-3">
                 <button onClick={handleDraftSave} disabled={actionLoading === 'draft'} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">{actionLoading === 'draft' ? 'Saving...' : 'Save Draft'}</button>
-                <button onClick={handleSubmitForm} disabled={actionLoading === 'submit'} className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white">{actionLoading === 'submit' ? 'Submitting...' : 'Submit Form'}</button>
+                <button onClick={handleSubmitForm} disabled={actionLoading === 'submit' || isJoiningFormSubmitted} className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white disabled:bg-slate-300">{actionLoading === 'submit' ? 'Submitting...' : isJoiningFormSubmitted ? 'Already Submitted' : 'Submit Form'}</button>
               </div>
             </div>
           </div>
@@ -731,25 +793,30 @@ function CandidateDashboard({ token, currentUser, setError, setMessage, onLogout
 
               <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-sm font-semibold text-slate-800">Step 1: Download NDA</p>
-                {nda?.esign_url ? (
-                  <a href={nda.esign_url} target="_blank" rel="noreferrer" className="mt-2 inline-block rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">
-                    Download NDA
-                  </a>
-                ) : (
-                  <p className="mt-2 text-sm text-slate-600">NDA link will appear after HR/referrer issues NDA.</p>
-                )}
+                <a href={ndaDownloadUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">
+                  Download NDA
+                </a>
+                {!nda?.esign_url && <p className="mt-2 text-xs text-slate-600">Showing sample Word NDA for now. HR-issued NDA will replace this link automatically.</p>}
               </div>
 
               <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-sm font-semibold text-slate-800">Step 2: Upload Signed Copy</p>
                 <input
+                  id="signed-nda-upload"
                   type="file"
-                  className="mt-2 text-sm"
+                  className="hidden"
                   accept=".pdf,.doc,.docx"
                   onChange={handleSignedNdaFileSelect}
                 />
+                <label
+                  htmlFor="signed-nda-upload"
+                  className="mt-2 inline-flex cursor-pointer rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
+                >
+                  Attach Signed Copy
+                </label>
                 {ndaSignedFileName && <p className="mt-2 text-xs font-semibold text-emerald-700">{ndaSignedFileName} selected</p>}
                 {actionLoading === 'upload-nda-file' && <p className="mt-2 text-xs font-semibold text-indigo-600">Uploading signed NDA...</p>}
+                {ndaUploadSuccess && <p className="mt-2 text-xs font-semibold text-emerald-700">NDA uploaded successfully.</p>}
                 <input
                   value={ndaSignedUrl}
                   onChange={(e) => setNdaSignedUrl(e.target.value)}

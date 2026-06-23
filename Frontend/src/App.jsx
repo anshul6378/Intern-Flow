@@ -11,6 +11,7 @@ const EMPTY_REGISTER = {
   full_name: '',
   email: '',
   employee_id: '',
+  department: '',
   password: '',
   role: 'referrer',
 }
@@ -121,7 +122,8 @@ const EMPTY_NDA_SEND = {
   expires_in_hours: 48,
 }
 
-const POPUP_TIMEOUT_MS = 2000
+const POPUP_TIMEOUT_MS = 3000
+const ADMIN_POPUP_TIMEOUT_MS = 3000
 
 function BrandPulseIcon({ className = 'h-5 w-5' }) {
   return (
@@ -172,6 +174,7 @@ function PortalRoleIcon({ role, className = 'h-4 w-4' }) {
 function App() {
   const [showAuthPanel, setShowAuthPanel] = useState(false)
   const [authPortal, setAuthPortal] = useState('referrer')
+  const [authPanelMode, setAuthPanelMode] = useState('login')
   const [registerForm, setRegisterForm] = useState(EMPTY_REGISTER)
   const [loginForm, setLoginForm] = useState(EMPTY_LOGIN)
   const [claimForm, setClaimForm] = useState(EMPTY_CLAIM)
@@ -200,13 +203,15 @@ function App() {
       return
     }
 
+    const popupTimeout = authPortal === 'admin' ? ADMIN_POPUP_TIMEOUT_MS : POPUP_TIMEOUT_MS
+
     const timeoutId = setTimeout(() => {
       setMessage('')
       setError('')
-    }, POPUP_TIMEOUT_MS)
+    }, popupTimeout)
 
     return () => clearTimeout(timeoutId)
-  }, [message, error])
+  }, [authPortal, message, error])
 
   const resetStatus = () => {
     setMessage('')
@@ -358,12 +363,16 @@ function App() {
     setLoading(true)
 
     try {
-      const data = await apiRequest('/auth/register', {
+      await apiRequest('/auth/register', {
         method: 'POST',
         body: JSON.stringify(registerForm),
       })
       setMessage(`You have been registered as ${registerForm.email}`)
       setRegisterForm(EMPTY_REGISTER)
+      if (registerForm.role === 'referrer') {
+        setAuthPanelMode('login')
+        setLoginForm((current) => ({ ...current, email: registerForm.email }))
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -406,6 +415,8 @@ function App() {
         body: JSON.stringify(claimForm),
       })
       setMessage(`${data.message}. You can log in now as ${claimForm.email}`)
+      setAuthPanelMode('login')
+      setLoginForm({ email: claimForm.email, password: '' })
       setClaimForm(EMPTY_CLAIM)
     } catch (err) {
       setError(err.message)
@@ -870,6 +881,8 @@ function App() {
 
   const authTheme = authThemeByPortal[authPortal]
   const isClaimPortal = authPortal === 'candidate' || authPortal === 'mentor'
+  const isClaimMode = isClaimPortal && authPanelMode === 'claim'
+  const isReferrerPortal = authPortal === 'referrer'
   const isAdminPortal = authPortal === 'admin'
   const isHrPortal = authPortal === 'hr'
   const isFixedCredentialPortal = isAdminPortal || isHrPortal
@@ -909,6 +922,7 @@ function App() {
                     key={item.value}
                     onClick={() => {
                       setAuthPortal(item.value)
+                      setAuthPanelMode(item.value === 'referrer' ? 'login' : 'login')
                       setRegisterForm((current) => ({ ...current, role: item.value }))
                       if (item.value === 'admin') {
                         setLoginForm(FIXED_ADMIN_LOGIN)
@@ -941,7 +955,7 @@ function App() {
               </div>
             </div>
 
-            {isClaimPortal ? (
+            {isClaimMode ? (
               <div className="mx-auto mt-7 w-full max-w-2xl">
                 <form onSubmit={handleClaimAccount} className="rounded-3xl border border-[#223664] bg-[#101d3f] p-6 shadow-[0_12px_28px_rgba(2,8,31,0.4)]">
                   <div className="flex items-center justify-between">
@@ -977,14 +991,22 @@ function App() {
                     {loading ? 'Working...' : 'Claim account'}
                   </button>
 
+                  <button
+                    type="button"
+                    onClick={() => setAuthPanelMode('login')}
+                    className="mt-3 w-full rounded-xl border border-[#2d416e] px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-slate-400 hover:text-white"
+                  >
+                    Back to Sign In
+                  </button>
+
                   <p className="mt-5 text-center text-sm text-slate-400">
                     Don't have an account yet? <span style={{ color: authTheme.accent }} className="font-semibold">Contact HR</span>
                   </p>
                 </form>
               </div>
             ) : (
-              <div className={`mt-7 grid gap-4 ${isFixedCredentialPortal ? 'lg:grid-cols-1' : 'lg:grid-cols-2'}`}>
-                {!isFixedCredentialPortal && (
+              <div className={`mt-7 grid gap-4 ${(isFixedCredentialPortal || isReferrerPortal || isClaimPortal) ? 'lg:grid-cols-1' : 'lg:grid-cols-2'}`}>
+                {!isFixedCredentialPortal && !isReferrerPortal && !isClaimPortal && (
                 <form onSubmit={handleRegister} className="rounded-3xl border border-[#223664] bg-[#101d3f] p-5 shadow-[0_12px_28px_rgba(2,8,31,0.4)]">
                   <div className="flex items-center justify-between">
                     <div>
@@ -1004,10 +1026,16 @@ function App() {
                       <input id="register_email" name="email" type="email" value={registerForm.email} onChange={handleRegisterChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="you@company.com" required />
                     </div>
                     {registerForm.role === 'referrer' && (
-                      <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="register_employee_id">Employee ID</label>
-                        <input id="register_employee_id" name="employee_id" value={registerForm.employee_id} onChange={handleRegisterChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="e.g. HEX-1024" required />
-                      </div>
+                      <>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="register_employee_id">Employee ID</label>
+                          <input id="register_employee_id" name="employee_id" value={registerForm.employee_id} onChange={handleRegisterChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="e.g. HEX-1024" required />
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="register_department">Department</label>
+                          <input id="register_department" name="department" value={registerForm.department} onChange={handleRegisterChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="e.g. Engineering" required />
+                        </div>
+                      </>
                     )}
                     <div>
                       <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="register_password">Password</label>
@@ -1021,6 +1049,55 @@ function App() {
                 </form>
                 )}
 
+                {isReferrerPortal && authPanelMode === 'register' && (
+                <form onSubmit={handleRegister} className="rounded-3xl border border-[#223664] bg-[#101d3f] p-5 shadow-[0_12px_28px_rgba(2,8,31,0.4)]">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">New User</p>
+                      <h2 className="mt-1 text-2xl font-bold text-white">Register</h2>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setAuthPanelMode('login')}
+                        className="rounded-xl border border-[#2d416e] px-3 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-400 hover:text-white"
+                      >
+                        Back to Sign In
+                      </button>
+                      <div className="rounded-xl px-3 py-1.5 text-base font-bold text-white" style={{ backgroundColor: authTheme.accent }}>{authTheme.icon}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 space-y-4">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="register_full_name">Full name</label>
+                      <input id="register_full_name" name="full_name" value={registerForm.full_name} onChange={handleRegisterChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="e.g. Priya Sharma" required />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="register_email">Email</label>
+                      <input id="register_email" name="email" type="email" value={registerForm.email} onChange={handleRegisterChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="you@company.com" required />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="register_employee_id">Employee ID</label>
+                      <input id="register_employee_id" name="employee_id" value={registerForm.employee_id} onChange={handleRegisterChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="e.g. HEX-1024" required />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="register_department_referrer">Department</label>
+                      <input id="register_department_referrer" name="department" value={registerForm.department} onChange={handleRegisterChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="e.g. Engineering" required />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="register_password">Password</label>
+                      <input id="register_password" name="password" type="password" value={registerForm.password} onChange={handleRegisterChange} className="w-full rounded-xl border border-[#2d416e] bg-[#1e2d4a] px-4 py-3 text-white outline-none transition placeholder:text-slate-400" placeholder="********" required />
+                    </div>
+                  </div>
+
+                  <button disabled={loading} className="mt-5 w-full rounded-xl py-2.5 text-sm font-semibold text-white transition disabled:opacity-60" style={{ backgroundColor: authTheme.accent }}>
+                    {loading ? 'Working...' : 'Create account'}
+                  </button>
+                </form>
+                )}
+
+                {(!isReferrerPortal || authPanelMode === 'login') && (!isClaimPortal || authPanelMode === 'login') && (
                 <form onSubmit={handleLogin} className="rounded-3xl border border-[#223664] bg-[#101d3f] p-5 shadow-[0_12px_28px_rgba(2,8,31,0.4)]">
                   <div className="flex items-center justify-between">
                     <div>
@@ -1054,7 +1131,35 @@ function App() {
                   <button disabled={loading} className="mt-5 w-full rounded-xl py-2.5 text-sm font-semibold text-white transition disabled:opacity-60" style={{ backgroundColor: authTheme.accent }}>
                     {loading ? 'Working...' : 'Sign in'}
                   </button>
+
+                  {isReferrerPortal && authPanelMode === 'login' && (
+                    <button
+                      type="button"
+                      onClick={() => setAuthPanelMode('register')}
+                      className="mt-3 w-full rounded-xl border border-[#2d416e] px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-slate-400 hover:text-white"
+                    >
+                      Register / New User
+                    </button>
+                  )}
+
+                  {isClaimPortal && authPanelMode === 'login' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClaimForm((current) => ({
+                          ...current,
+                          email: loginForm.email || current.email,
+                          role: authPortal,
+                        }))
+                        setAuthPanelMode('claim')
+                      }}
+                      className="mt-3 w-full rounded-xl border border-[#2d416e] px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-slate-400 hover:text-white"
+                    >
+                      Claim Account
+                    </button>
+                  )}
                 </form>
+                )}
               </div>
             )}
           </main>
@@ -1110,7 +1215,7 @@ function App() {
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Choose Your Portal</p>
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 {portalItems.map((item) => (
-                  <button key={item.value} onClick={() => { setAuthPortal(item.value); setShowAuthPanel(true); setRegisterForm((current) => ({ ...current, role: item.value })); if (item.value === 'admin') { setLoginForm(FIXED_ADMIN_LOGIN) } if (item.value === 'hr') { setLoginForm(FIXED_HR_LOGIN) } if (item.value === 'candidate' || item.value === 'mentor') { setClaimForm((current) => ({ ...current, role: item.value })) } }} className="rounded-3xl border border-slate-300 bg-[#f5f8fc] p-4 text-left shadow-sm transition hover:shadow-md">
+                  <button key={item.value} onClick={() => { setAuthPortal(item.value); setAuthPanelMode('login'); setShowAuthPanel(true); setRegisterForm((current) => ({ ...current, role: item.value })); if (item.value === 'admin') { setLoginForm(FIXED_ADMIN_LOGIN) } if (item.value === 'hr') { setLoginForm(FIXED_HR_LOGIN) } if (item.value === 'candidate' || item.value === 'mentor') { setClaimForm((current) => ({ ...current, role: item.value })) } }} className="rounded-3xl border border-slate-300 bg-[#f5f8fc] p-4 text-left shadow-sm transition hover:shadow-md">
                     <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-300 bg-white text-indigo-500">
                       <PortalRoleIcon role={item.value} className="h-4 w-4" />
                     </div>

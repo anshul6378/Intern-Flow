@@ -6,6 +6,8 @@ const NAV = [
   { group: 'SYSTEM', items: [{ id: 'users', label: 'User Management' }, { id: 'settings', label: 'Settings' }] },
 ]
 
+const NOTICE_TIMEOUT_MS = 3000
+
 function ManagerDashboard({ token, currentUser, setError, setMessage, onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [loading, setLoading] = useState(false)
@@ -16,6 +18,18 @@ function ManagerDashboard({ token, currentUser, setError, setMessage, onLogout }
   const [selectedReviewId, setSelectedReviewId] = useState('')
   const [reviewNotes, setReviewNotes] = useState('')
   const [reviewActionLoading, setReviewActionLoading] = useState('')
+
+  useEffect(() => {
+    if (!notice.text) {
+      return
+    }
+
+    const timeoutId = setTimeout(() => {
+      setNotice({ type: '', text: '' })
+    }, NOTICE_TIMEOUT_MS)
+
+    return () => clearTimeout(timeoutId)
+  }, [notice])
 
   const apiRequest = async (path, options = {}) => {
     const response = await fetch(`/api/v1${path}`, {
@@ -129,6 +143,9 @@ function ManagerDashboard({ token, currentUser, setError, setMessage, onLogout }
       return
     }
 
+    const referralForMessage = reviewQueue.find((item) => item.id === selectedReviewId) || null
+    const candidateName = getReviewCandidateName(referralForMessage)
+
     setReviewActionLoading(decision)
     setLoading(true)
     try {
@@ -145,8 +162,8 @@ function ManagerDashboard({ token, currentUser, setError, setMessage, onLogout }
         : decision === 'REJECT'
           ? 'rejected'
           : 'sent back for changes'
-      setMessage(`Referral ${selectedReviewId} ${actionLabel}`)
-      setNotice({ type: 'success', text: `Referral ${selectedReviewId} ${actionLabel}` })
+      setMessage(`Referral ${candidateName} ${actionLabel}`)
+      setNotice({ type: 'success', text: `Referral ${candidateName} ${actionLabel}` })
       setReviewNotes('')
       await refreshAdminData()
     } catch (err) {

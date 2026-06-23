@@ -33,7 +33,8 @@ def register(
             full_name=payload.full_name,
             password=payload.password,
             role=payload.role,
-            employee_id=payload.employee_id
+            employee_id=payload.employee_id,
+            department=payload.department,
         )
 
         return {

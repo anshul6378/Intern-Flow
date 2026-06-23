@@ -24,6 +24,7 @@ class AuthService:
         password: str,
         role: str,
         employee_id: str | None = None,
+        department: str | None = None,
     ):
 
         existing_user = UserRepository.get_user_by_email(
@@ -54,6 +55,7 @@ class AuthService:
             hashed_password=hash_password(password),
             role=role,
             employee_id=employee_id,
+            department=department,
         )
 
         try:

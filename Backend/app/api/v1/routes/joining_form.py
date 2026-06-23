@@ -40,8 +40,14 @@ def get_joining_form(
     """Get joining form for a referral."""
     try:
         current_user_id = cast(UUID, current_user.id)
+        current_user_role = cast(str, current_user.role)
         service = JoiningFormService(db)
-        form = service.get_form(referral_id, current_user_id)
+        if current_user_role in {"hr", "admin"}:
+            form = service.form_repo.get_by_referral_id(db, referral_id)
+            if not form:
+                raise ValueError(f"Joining form not found for referral {referral_id}")
+        else:
+            form = service.get_form(referral_id, current_user_id)
         return _serialize_form(form)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -165,8 +171,30 @@ def get_joining_form_status(
     """Get high-level joining form status."""
     try:
         current_user_id = cast(UUID, current_user.id)
+        current_user_role = cast(str, current_user.role)
         service = JoiningFormService(db)
-        status_data = service.get_form_status(referral_id, current_user_id)
+        if current_user_role in {"hr", "admin"}:
+            form = service.form_repo.get_by_referral_id(db, referral_id)
+            if not form:
+                raise ValueError(f"Joining form not found for referral {referral_id}")
+            status_data = {
+                "form_id": form.id,
+                "referral_id": form.referral_id,
+                "status": form.status,
+                "declarations_signed": form.declarations_signed,
+                "created_at": form.created_at,
+                "submitted_at": form.submitted_at,
+                "approved_at": form.approved_at,
+                "submitted_by": form.submitted_by,
+                "reviewed_by": form.reviewed_by,
+                "has_personal_details": form.personal_details is not None,
+                "has_address": form.address is not None,
+                "has_emergency_contact": form.emergency_contact is not None,
+                "has_education": form.education_history is not None and len(form.education_history) > 0,
+                "has_government_ids": form.government_ids is not None and len(form.government_ids) > 0,
+            }
+        else:
+            status_data = service.get_form_status(referral_id, current_user_id)
         return status_data
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

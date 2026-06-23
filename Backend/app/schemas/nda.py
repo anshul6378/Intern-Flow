@@ -54,6 +54,8 @@ class NDAListItemResponse(BaseModel):
 
     id: UUID
     referral_id: UUID
+    candidate_name: str | None = None
+    candidate_email: str | None = None
     status: str
     archived_url: str | None = None
     esign_provider: str | None = None

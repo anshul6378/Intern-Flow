@@ -85,6 +85,7 @@ function formatApiDetail(detail) {
 function ReferrerDashboard({ token, currentUser, onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [referrals, setReferrals] = useState([])
+  const [notificationEvents, setNotificationEvents] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
@@ -97,6 +98,8 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
     parsed_resume_data: null,
     confidence_score: null,
   })
+  const [editingReferralId, setEditingReferralId] = useState('')
+  const [editingReferralStatus, setEditingReferralStatus] = useState('')
   const [resumeParsing, setResumeParsing] = useState(false)
   const [currentStep, setCurrentStep] = useState(1)
 
@@ -129,6 +132,27 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
       const list = await apiRequest('/referrals/me/referrer')
       const items = list.items || []
       setReferrals(items)
+
+      if (currentUser?.id && items.length) {
+        const timelines = await Promise.all(
+          items.map((item) => apiRequest(`/referrals/${item.id}/timeline`).catch(() => ({ events: [] }))),
+        )
+
+        const notifications = timelines
+          .flatMap((timeline, index) => (timeline.events || [])
+            .filter((event) => (
+              event.event_type === 'NOTIFICATION_SENT'
+              && event.data?.recipient_role === 'referrer'
+              && event.data?.recipient_user_id === currentUser.id
+            ))
+            .map((event) => ({ ...event, referral_id: items[index].id })))
+          .sort((left, right) => new Date(right.timestamp || right.created_at || 0) - new Date(left.timestamp || left.created_at || 0))
+
+        setNotificationEvents(notifications)
+      } else {
+        setNotificationEvents([])
+      }
+
       if (!selectedId && items.length) {
         setSelectedId(items[0].id)
       }
@@ -137,14 +161,14 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
     } finally {
       setLoading(false)
     }
-  }, [apiRequest, selectedId])
+  }, [apiRequest, currentUser?.id, selectedId])
 
   useEffect(() => {
     loadReferrals()
   }, [loadReferrals])
 
   useEffect(() => {
-    if (notice.type !== 'success' || !notice.text) {
+    if (!notice.text) {
       return undefined
     }
 
@@ -175,7 +199,27 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
     return { total, inProgress, accepted, pendingAction }
   }, [referrals])
 
-  const notificationCount = useMemo(() => referrals.filter((r) => ['ELIGIBILITY_REVIEW', 'NDA_PENDING', 'JOINING_FORM_SUBMITTED'].includes(r.state)).length, [referrals])
+  const notificationCount = useMemo(() => notificationEvents.length, [notificationEvents])
+
+  const getNotificationMessage = (event) => {
+    const template = event?.data?.template
+    const shortReferralId = (event?.referral_id || '').slice(0, 8)
+    const notes = event?.data?.notes?.trim?.()
+
+    if (template === 'admin_review_approve') {
+      return `Referral ${shortReferralId} was approved by admin and moved forward.`
+    }
+    if (template === 'admin_review_reject') {
+      return `Referral ${shortReferralId} was rejected by admin.`
+    }
+    if (template === 'admin_review_request_changes') {
+      return notes
+        ? `Referral ${shortReferralId} was sent back for changes by admin. Comment: ${notes}`
+        : `Referral ${shortReferralId} was sent back for changes by admin.`
+    }
+
+    return `Update available for referral ${shortReferralId}.`
+  }
 
   const internshipDuration = useMemo(() => {
     if (!form.start_date || !form.end_date) {
@@ -195,6 +239,176 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
 
     return `${diffInDays} days (${weeks} weeks)`
   }, [form.start_date, form.end_date])
+
+  const normalizeDateValue = (value) => {
+    if (!value) return ''
+    const raw = String(value)
+    if (raw.includes('T')) {
+      return raw.split('T')[0]
+    }
+    return raw
+  }
+
+  const buildFormFromReferral = (referral) => {
+    const additional = referral?.additional_data || {}
+    const candidate = additional.candidate_details || {}
+    const education = candidate.education || {}
+    const links = candidate.links || {}
+    const internship = additional.internship_details || {}
+    const mentor = additional.mentor_details || {}
+    const project = additional.project_information || {}
+    const evaluation = additional.candidate_evaluation || {}
+    const eligibility = additional.eligibility_confirmation || {}
+    const declaration = additional.referrer_declaration || {}
+
+    return {
+      ...EMPTY_FORM,
+      candidate_name: candidate.name || '',
+      candidate_email: candidate.email || referral?.candidate_email || '',
+      candidate_phone: candidate.phone || '',
+      current_city: candidate.current_city || '',
+      internship_title: internship.internship_title || '',
+      department_function: internship.department_function || '',
+      internship_location: internship.location || referral?.location || '',
+      mentor_name: mentor.mentor_name || '',
+      mentor_employee_id: mentor.mentor_employee_id || '',
+      mentor_email: mentor.mentor_email || referral?.mentor_email || '',
+      mentor_department: mentor.mentor_department || '',
+      start_date: normalizeDateValue(internship.internship_start_date || referral?.start_date),
+      end_date: normalizeDateValue(internship.internship_end_date || referral?.end_date),
+      project_title: project.project_title || '',
+      project_description: project.project_description || referral?.project_overview || '',
+      expected_deliverables: project.expected_deliverables || '',
+      technologies_skills_required: project.technologies_skills_required || '',
+      business_justification: project.business_justification || '',
+      skills_match_rating: evaluation.skills_match?.suitability_rating || '',
+      candidate_strengths: evaluation.candidate_strengths || '',
+      suitability_reason: evaluation.suitability_reason || '',
+      additional_comments: evaluation.additional_comments || '',
+      unpaid_internship_acknowledged: Boolean(eligibility.candidate_understands_unpaid_internship ?? referral?.unpaid_consent_confirmed),
+      available_during_internship: Boolean(eligibility.candidate_available_during_internship_period ?? referral?.in_person_ready_confirmed),
+      willing_for_specified_location: Boolean(eligibility.candidate_willing_for_specified_location ?? referral?.location_match_confirmed),
+      can_dedicate_required_hours: Boolean(eligibility.candidate_can_dedicate_required_hours),
+      relationship_with_candidate: declaration.relationship_with_candidate || referral?.relationship_to_mentor || '',
+      relationship_additional_explanation: declaration.additional_explanation || '',
+      project_overview: referral?.project_overview || '',
+      relationship_to_mentor: referral?.relationship_to_mentor || '',
+      college: education.college || '',
+      degree: education.degree || '',
+      specialization_branch: education.specialization_branch || '',
+      expected_graduation_date: normalizeDateValue(education.expected_graduation_date),
+      linkedin_url: links.linkedin || '',
+    }
+  }
+
+  const buildReferralPayload = () => ({
+    candidate_email: form.candidate_email,
+    mentor_email: form.mentor_email,
+    start_date: form.start_date || null,
+    end_date: form.end_date || null,
+    project_overview: form.project_description || form.project_title || form.project_overview || form.internship_title,
+    location: form.internship_location,
+    relationship_to_mentor: form.relationship_with_candidate,
+    unpaid_consent_confirmed: form.unpaid_internship_acknowledged,
+    in_person_ready_confirmed: form.available_during_internship,
+    location_match_confirmed: form.willing_for_specified_location,
+    additional_data: {
+      candidate_details: {
+        name: form.candidate_name,
+        email: form.candidate_email,
+        phone: form.candidate_phone,
+        current_city: form.current_city,
+        education: {
+          college: form.college,
+          degree: form.degree,
+          specialization_branch: form.specialization_branch,
+          expected_graduation_date: form.expected_graduation_date,
+        },
+        links: {
+          linkedin: form.linkedin_url,
+        },
+      },
+      internship_details: {
+        internship_title: form.internship_title,
+        department_function: form.department_function,
+        internship_start_date: form.start_date,
+        internship_end_date: form.end_date,
+        duration: internshipDuration,
+        location: form.internship_location,
+      },
+      mentor_details: {
+        mentor_name: form.mentor_name,
+        mentor_employee_id: form.mentor_employee_id,
+        mentor_email: form.mentor_email,
+        mentor_department: form.mentor_department,
+      },
+      project_information: {
+        project_title: form.project_title,
+        project_description: form.project_description,
+        expected_deliverables: form.expected_deliverables,
+        technologies_skills_required: form.technologies_skills_required,
+        business_justification: form.business_justification,
+      },
+      candidate_evaluation: {
+        skills_match: {
+          suitability_rating: form.skills_match_rating,
+        },
+        candidate_strengths: form.candidate_strengths,
+        suitability_reason: form.suitability_reason,
+        additional_comments: form.additional_comments,
+      },
+      eligibility_confirmation: {
+        candidate_understands_unpaid_internship: form.unpaid_internship_acknowledged,
+        candidate_available_during_internship_period: form.available_during_internship,
+        candidate_willing_for_specified_location: form.willing_for_specified_location,
+        candidate_can_dedicate_required_hours: form.can_dedicate_required_hours,
+      },
+      referrer_declaration: {
+        relationship_with_candidate: form.relationship_with_candidate,
+        additional_explanation: form.relationship_additional_explanation,
+      },
+      referrer_information: {
+        referrer_name: currentUser?.full_name || '',
+        employee_id: currentUser?.employee_id || currentUser?.id || '',
+        department: currentUser?.department || '',
+        email: currentUser?.email || '',
+      },
+      ...(uploadedResume ? { uploaded_resume_file_name: uploadedResume } : {}),
+      ...(uploadedResumeMeta.resume_url ? { uploaded_resume_url: uploadedResumeMeta.resume_url } : {}),
+      ...(uploadedResumeMeta.parsed_resume_data ? { parsed_resume_data: uploadedResumeMeta.parsed_resume_data } : {}),
+      ...(uploadedResumeMeta.confidence_score !== null ? { resume_parse_confidence: uploadedResumeMeta.confidence_score } : {}),
+    },
+  })
+
+  const startEditingReferral = (referral) => {
+    setEditingReferralId(referral.id)
+    setEditingReferralStatus(referral.status || '')
+    setForm(buildFormFromReferral(referral))
+
+    const additional = referral.additional_data || {}
+    const reviewNotes = additional.admin_review?.notes || ''
+    setUploadedResume(additional.uploaded_resume_file_name || '')
+    setUploadedResumeMeta({
+      resume_url: additional.uploaded_resume_url || additional.resume_url || '',
+      parsed_resume_data: additional.parsed_resume_data || null,
+      confidence_score: Number.isFinite(additional.resume_parse_confidence)
+        ? additional.resume_parse_confidence
+        : null,
+    })
+
+    setCurrentStep(2)
+    setActiveTab('submit-referral')
+    if (reviewNotes) {
+      setNotice({ type: 'success', text: `Admin comment: ${reviewNotes}` })
+    } else {
+      setNotice({ type: 'success', text: 'This referral is open for edits. Update details and resubmit.' })
+    }
+  }
+
+  const clearEditingState = () => {
+    setEditingReferralId('')
+    setEditingReferralStatus('')
+  }
 
   const handleSubmitReferral = async () => {
     if (
@@ -232,90 +446,35 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
     setActionLoading(true)
     setNotice({ type: '', text: '' })
     try {
-      await apiRequest('/referrals', {
-        method: 'POST',
-        body: JSON.stringify({
-          candidate_email: form.candidate_email,
-          mentor_email: form.mentor_email,
-          start_date: form.start_date || null,
-          end_date: form.end_date || null,
-          project_overview: form.project_description || form.project_title || form.project_overview || form.internship_title,
-          location: form.internship_location,
-          relationship_to_mentor: form.relationship_with_candidate,
-          unpaid_consent_confirmed: form.unpaid_internship_acknowledged,
-          in_person_ready_confirmed: form.available_during_internship,
-          location_match_confirmed: form.willing_for_specified_location,
-          additional_data: {
-            candidate_details: {
-              name: form.candidate_name,
-              email: form.candidate_email,
-              phone: form.candidate_phone,
-              current_city: form.current_city,
-              education: {
-                college: form.college,
-                degree: form.degree,
-                specialization_branch: form.specialization_branch,
-                expected_graduation_date: form.expected_graduation_date,
-              },
-              links: {
-                linkedin: form.linkedin_url,
-              },
-            },
-            internship_details: {
-              internship_title: form.internship_title,
-              department_function: form.department_function,
-              internship_start_date: form.start_date,
-              internship_end_date: form.end_date,
-              duration: internshipDuration,
-              location: form.internship_location,
-            },
-            mentor_details: {
-              mentor_name: form.mentor_name,
-              mentor_employee_id: form.mentor_employee_id,
-              mentor_email: form.mentor_email,
-              mentor_department: form.mentor_department,
-            },
-            project_information: {
-              project_title: form.project_title,
-              project_description: form.project_description,
-              expected_deliverables: form.expected_deliverables,
-              technologies_skills_required: form.technologies_skills_required,
-              business_justification: form.business_justification,
-            },
-            candidate_evaluation: {
-              skills_match: {
-                suitability_rating: form.skills_match_rating,
-              },
-              candidate_strengths: form.candidate_strengths,
-              suitability_reason: form.suitability_reason,
-              additional_comments: form.additional_comments,
-            },
-            eligibility_confirmation: {
-              candidate_understands_unpaid_internship: form.unpaid_internship_acknowledged,
-              candidate_available_during_internship_period: form.available_during_internship,
-              candidate_willing_for_specified_location: form.willing_for_specified_location,
-              candidate_can_dedicate_required_hours: form.can_dedicate_required_hours,
-            },
-            referrer_declaration: {
-              relationship_with_candidate: form.relationship_with_candidate,
-              additional_explanation: form.relationship_additional_explanation,
-            },
-            referrer_information: {
-              referrer_name: currentUser?.full_name || '',
-              employee_id: currentUser?.employee_id || currentUser?.id || '',
-              department: currentUser?.department || '',
-              email: currentUser?.email || '',
-            },
-            ...(uploadedResume ? { uploaded_resume_file_name: uploadedResume } : {}),
-            ...(uploadedResumeMeta.resume_url ? { uploaded_resume_url: uploadedResumeMeta.resume_url } : {}),
-            ...(uploadedResumeMeta.parsed_resume_data ? { parsed_resume_data: uploadedResumeMeta.parsed_resume_data } : {}),
-            ...(uploadedResumeMeta.confidence_score !== null ? { resume_parse_confidence: uploadedResumeMeta.confidence_score } : {}),
-          },
-        }),
-      })
+      const isEditing = Boolean(editingReferralId)
+      const payload = buildReferralPayload()
+
+      if (isEditing) {
+        const updatePayload = {
+          ...payload,
+          ...(editingReferralStatus === 'CHANGES_REQUESTED' ? { status: 'ACTIVE', state: 'SUBMITTED' } : {}),
+        }
+
+        await apiRequest(`/referrals/${editingReferralId}`, {
+          method: 'PUT',
+          body: JSON.stringify(updatePayload),
+        })
+      } else {
+        await apiRequest('/referrals', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        })
+      }
+
       const candidateName = form.candidate_name.trim() || 'Candidate'
-      setNotice({ type: 'success', text: `You have referred ${candidateName}` })
+      setNotice({
+        type: 'success',
+        text: editingReferralId
+          ? `Referral for ${candidateName} was updated and resubmitted.`
+          : `You have referred ${candidateName}`,
+      })
       setForm(EMPTY_FORM)
+      clearEditingState()
       setUploadedResume('')
       setUploadedResumeMeta({ resume_url: '', parsed_resume_data: null, confidence_score: null })
       setCurrentStep(1)
@@ -507,13 +666,28 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
               <h3 className="mb-4 text-3xl font-bold text-slate-800">My Referrals</h3>
               <div className="space-y-3">
                 {filteredReferrals.map((r) => (
-                  <button key={r.id} onClick={() => setSelectedId(r.id)} className={`w-full rounded-xl border px-4 py-3 text-left ${selectedId === r.id ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white'}`}>
+                  <div key={r.id} className={`w-full rounded-xl border px-4 py-3 text-left ${selectedId === r.id ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white'}`}>
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-slate-800">{getCandidateName(r)}</p>
+                      <button onClick={() => setSelectedId(r.id)} className="text-left text-sm font-semibold text-slate-800 hover:text-indigo-700">
+                        {getCandidateName(r)}
+                      </button>
                       <span className={`rounded-full px-3 py-1 text-xs font-semibold ${BADGE_TONE[r.state] || 'bg-slate-200 text-slate-700'}`}>{r.state}</span>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">{r.project_overview || 'No project overview provided'}</p>
-                  </button>
+                    {r.status === 'CHANGES_REQUESTED' && (
+                      <div className="mt-3 flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => {
+                            setSelectedId(r.id)
+                            startEditingReferral(r)
+                          }}
+                          className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
+                        >
+                          Edit And Resubmit
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 ))}
                 {!filteredReferrals.length && <p className="text-sm text-slate-500">No referrals found.</p>}
               </div>
@@ -528,6 +702,22 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
                   <p><span className="font-semibold text-slate-900">Location:</span> {selectedReferral.location || 'Not set'}</p>
                   <p><span className="font-semibold text-slate-900">Project:</span> {selectedReferral.project_overview || 'Not set'}</p>
                   <p><span className="font-semibold text-slate-900">Submitted:</span> {new Date(selectedReferral.created_at).toLocaleString()}</p>
+                  {selectedReferral.status === 'CHANGES_REQUESTED' && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                      <p className="font-semibold">Admin sent this referral back for changes.</p>
+                      <p className="mt-1 text-sm text-amber-800">
+                        {selectedReferral.additional_data?.admin_review?.notes || 'No comment provided by admin.'}
+                      </p>
+                    </div>
+                  )}
+                  {selectedReferral.status === 'CHANGES_REQUESTED' && (
+                    <button
+                      onClick={() => startEditingReferral(selectedReferral)}
+                      className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+                    >
+                      Edit And Resubmit
+                    </button>
+                  )}
                 </div>
               ) : <p className="text-sm text-slate-500">Select a referral to view details.</p>}
             </div>
@@ -538,8 +728,20 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
           <div className="space-y-6 p-8">
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
               <div className="flex items-center justify-between">
-                <h3 className="text-3xl font-bold text-slate-800">Submit New Referral</h3>
-                <button onClick={() => { setActiveTab('dashboard'); setCurrentStep(1); }} className="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
+                <h3 className="text-3xl font-bold text-slate-800">{editingReferralId ? 'Edit Referral' : 'Submit New Referral'}</h3>
+                <button
+                  onClick={() => {
+                    clearEditingState()
+                    setForm(EMPTY_FORM)
+                    setUploadedResume('')
+                    setUploadedResumeMeta({ resume_url: '', parsed_resume_data: null, confidence_score: null })
+                    setActiveTab('dashboard')
+                    setCurrentStep(1)
+                  }}
+                  className="text-sm text-slate-500 hover:text-slate-700"
+                >
+                  Cancel
+                </button>
               </div>
               <p className="mt-2 text-sm text-slate-500">
                 Step {currentStep} of 3: {currentStep === 1 ? 'Submit Resume' : currentStep === 2 ? 'Candidate & Internship Details' : 'Final Review & Submission'}
@@ -550,6 +752,15 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
                 ))}
               </div>
             </div>
+
+            {editingReferralId && editingReferralStatus === 'CHANGES_REQUESTED' && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-900">
+                <p className="text-base font-semibold">Admin requested updates on this referral.</p>
+                <p className="mt-1 text-sm text-amber-800">
+                  {selectedReferral?.additional_data?.admin_review?.notes || 'No comment provided by admin.'}
+                </p>
+              </div>
+            )}
 
             {currentStep === 1 && (
               <div className="rounded-2xl border border-indigo-100 bg-white p-6">
@@ -829,7 +1040,7 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
                   <button onClick={() => setCurrentStep(2)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600">Go Back</button>
                   <div className="flex items-center gap-3">
                     <button onClick={() => setNotice({ type: 'success', text: 'Draft saved locally.' })} className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">Save Draft</button>
-                    <button onClick={handleSubmitReferral} disabled={actionLoading} className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60">{actionLoading ? 'Submitting...' : 'Submit Referral'}</button>
+                    <button onClick={handleSubmitReferral} disabled={actionLoading} className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60">{actionLoading ? (editingReferralId ? 'Resubmitting...' : 'Submitting...') : (editingReferralId ? 'Resubmit Referral' : 'Submit Referral')}</button>
                   </div>
                 </div>
               </div>
@@ -843,6 +1054,11 @@ function ReferrerDashboard({ token, currentUser, onLogout }) {
                   <h3 className="text-3xl font-bold text-slate-800">Notifications</h3>
                   <p className="mt-1 text-sm text-slate-500">Alerts generated from your referral pipeline.</p>
                   <div className="mt-4 space-y-3">
+                    {notificationEvents.map((event) => (
+                      <div key={event.id} className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
+                        {getNotificationMessage(event)}
+                      </div>
+                    ))}
                     {referrals.filter((r) => ['ELIGIBILITY_REVIEW', 'NDA_PENDING', 'JOINING_FORM_SUBMITTED'].includes(r.state)).map((r) => (
                       <div key={r.id} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
                         Referral {r.id.slice(0, 8)} requires action at state {r.state}.

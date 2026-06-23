@@ -9,6 +9,7 @@ class UserRegister(BaseModel):
     password: str
     role: Literal["referrer", "candidate", "mentor", "hr", "admin"]
     employee_id: str | None = None
+    department: str | None = None
     
     @field_validator('password')
     @classmethod
@@ -26,10 +27,20 @@ class UserRegister(BaseModel):
         value = v.strip()
         return value or None
 
+    @field_validator('department')
+    @classmethod
+    def validate_department(cls, v):
+        if v is None:
+            return v
+        value = v.strip()
+        return value or None
+
     @model_validator(mode='after')
     def validate_referrer_employee_id(self):
         if self.role == 'referrer' and not self.employee_id:
             raise ValueError('Employee ID is required for referrer registration')
+        if self.role == 'referrer' and not self.department:
+            raise ValueError('Department is required for referrer registration')
         return self
 
 

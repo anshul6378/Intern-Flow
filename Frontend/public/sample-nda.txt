@@ -1,0 +1,44 @@
+INTERNFLOW SAMPLE NON-DISCLOSURE AGREEMENT (NDA)
+
+This Sample NDA is provided for UI demonstration and testing purposes.
+It is NOT a legally binding agreement.
+
+1. Confidential Information
+Confidential Information includes non-public business, technical, product, process,
+customer, and operational details shared during internship onboarding and execution.
+
+2. Non-Disclosure Obligation
+The Receiving Party agrees to:
+- keep Confidential Information strictly confidential,
+- use Confidential Information only for authorized internship activities,
+- not disclose Confidential Information to any unauthorized third party.
+
+3. Permitted Access
+Access is limited to personnel who need the information to perform assigned responsibilities
+and who are bound by equivalent confidentiality obligations.
+
+4. Exclusions
+Confidential Information does not include information that:
+- is publicly available without breach,
+- was already known lawfully,
+- is independently developed without use of confidential material,
+- is lawfully received from a third party without restriction.
+
+5. Term
+Confidentiality obligations survive internship completion for the period required by policy
+or applicable law.
+
+6. Return/Deletion
+Upon request or completion, Confidential Information and derivative copies must be returned
+or securely deleted, except where retention is required by law.
+
+7. No License
+No intellectual property rights are granted by disclosure of Confidential Information.
+
+8. Governing Policy
+This sample document follows internal policy placeholders and is only for product demo use.
+
+Accepted by:
+Candidate Name: _____________________
+Date: _______________________________
+Signature: __________________________

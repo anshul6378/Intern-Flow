@@ -273,4 +273,37 @@ class NDAService:
     @staticmethod
     def list_pending_ndas(db: Session):
         items = NDADocumentRepository.get_by_status(db, "UPLOADED")
-        return items, len(items)
+        serialized_items = []
+
+        for item in items:
+            referral = item.referral
+            candidate = referral.candidate if referral else None
+            additional_data = referral.additional_data or {} if referral else {}
+            candidate_details = additional_data.get("candidate_details") or {}
+
+            candidate_name = (
+                (candidate.full_name if candidate else None)
+                or candidate_details.get("name")
+                or candidate_details.get("full_name")
+            )
+            candidate_email = (
+                (candidate.email if candidate else None)
+                or candidate_details.get("email")
+            )
+
+            serialized_items.append(
+                {
+                    "id": item.id,
+                    "referral_id": item.referral_id,
+                    "candidate_name": candidate_name,
+                    "candidate_email": candidate_email,
+                    "status": item.status,
+                    "archived_url": item.archived_url,
+                    "esign_provider": item.esign_provider,
+                    "expires_at": item.expires_at,
+                    "created_at": item.created_at,
+                    "updated_at": item.updated_at,
+                }
+            )
+
+        return serialized_items, len(serialized_items)
